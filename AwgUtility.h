@@ -48,11 +48,6 @@ namespace Awg
 
     ///根据线程池线程数将一个长度为length块切割成若干个大小至少为minChun而且为aligned整倍数的小数组,返回这些数组的长度
     std::vector<std::size_t> cutArrayAligned(std::size_t length,std::size_t minChunk,std::size_t aligned) noexcept;
-
-    ///将给定数组array中[start,end)索引上的值转换为char*数据写入到frame数组中,数组中每个数据占用bitSize位
-    bool converteToBitFrame(const unsigned bitSize,char* frame,const Awg::DT* array,unsigned start,unsigned end);  //1024bit,前768bit存放，后256比特不适用
-
-    void convertIntTo12BitCharArray(const int* intArray, char* charArray, size_t numInts);
 }
 
 #endif // AWGUTILITY_H

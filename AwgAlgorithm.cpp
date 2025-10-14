@@ -134,6 +134,37 @@ std::pair<const short *, const short *> Awg::minmaxFast(const AwgShortArray &inp
     return ret;
 }
 
+void Awg::compressShort12Bit(const short *begin, const short *end, char *output)
+{
+    //每2个short最终占用3字节内存
+    short first = 0,seconde = 0;
+    while (begin + 2 <= end)
+    {
+        first = begin[0];
+        seconde = begin[1];
+
+        output[0] = static_cast<char>(first << 8);
+        output[1] = static_cast<char>(first << 12) |  static_cast<char>(seconde << 4) ;
+        output[2] = static_cast<char>(seconde << 8);
+
+        begin += 2;
+        output += 3;
+    }
+
+    //处理剩下的最后一个数据
+    if(begin != end)
+    {
+        first = *begin;
+        output[0] = static_cast<char>(first << 8);
+        output[1] = static_cast<char>(first << 12);
+    }
+}
+
+void Awg::compressShort12BitAvx2(const short *begin, const short *end, char *output)
+{
+
+}
+
 ///这个函数在仅在当前文件中被调用,因此可以保证inputBegin地址是按32字节对齐的,所以这里不需要额外处理未对齐的数据
 void normalizationAvx2(const double* inputBegin,const double* inputEnd,double* outputIterator,const double inputMin,const double inputMax,const double outputMin,const double outputMax)
 {

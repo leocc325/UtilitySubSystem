@@ -28,6 +28,12 @@ namespace Awg {
     ///从给定的数组中查找最小值和最大值,返回最小值和最大值指针
     std::pair<const short *, const short *> minmaxFast(const AwgShortArray& input);
 
+    ///将short数组中的每一个值取12bit压缩写入到二进制内存中,返回写入的长度,需要保证output长度足够写入全部数据,否则会导致程序崩溃
+    void compressShort12Bit(const short* begin,const short* end,char* output);//1024bit,前768bit存放，后256比特不适用
+
+    ///将short数组中的每一个值取12bit压缩写入到二进制内存中,返回写入的长度,需要保证output长度足够写入全部数据,否则会导致程序崩溃
+    void compressShort12BitAvx2(const short* begin,const short* end,char* output);
+
     ///将给定的double数组归一化,并返回一个字节对齐的数据,rangeLow和rangeHigh表示原始数据的范围,min和max表示归一化之后的数据范围
     AwgDoubleArray normalizationFast(const AwgDoubleArray& input,const double inputMin,const double inputMax,const double outputMin,const double outputMax);
 
