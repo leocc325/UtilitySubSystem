@@ -137,15 +137,15 @@ std::pair<const short *, const short *> Awg::minmaxFast(const AwgShortArray &inp
 void Awg::compressShort12Bit(const short *begin, const short *end, char *output)
 {
     //每2个short最终占用3字节内存
-    short first = 0,seconde = 0;
+    unsigned short first = 0,second = 0;
     while (begin + 2 <= end)
     {
-        first = begin[0];
-        seconde = begin[1];
+        first = begin[0] & 0xFFF;
+        second = begin[1] & 0xFFF;
 
-        output[0] = static_cast<char>(first << 8);
-        output[1] = static_cast<char>(first << 12) |  static_cast<char>(seconde << 4) ;
-        output[2] = static_cast<char>(seconde << 8);
+        output[0] = static_cast<char>(first >> 4);;//static_cast<char>(first << 8);
+        output[1] = static_cast<char>((first & 0xF) << 4) |  static_cast<char>(second >> 8);;//static_cast<char>(first << 12) |  static_cast<char>(seconde << 4) ;
+        output[2] = static_cast<char>(second & 0xFF); ;//static_cast<char>(second << 8);
 
         begin += 2;
         output += 3;
@@ -154,15 +154,47 @@ void Awg::compressShort12Bit(const short *begin, const short *end, char *output)
     //处理剩下的最后一个数据
     if(begin != end)
     {
-        first = *begin;
-        output[0] = static_cast<char>(first << 8);
-        output[1] = static_cast<char>(first << 12);
+        first = (*begin) & 0xFFF;
+        output[0] = static_cast<char>(first >> 4);
+        output[1] = static_cast<char>((first & 0xF) << 4);
     }
 }
 
 void Awg::compressShort12BitAvx2(const short *begin, const short *end, char *output)
 {
+    const std::size_t chunkLeng = 32 / sizeof (short);
+    __m256i dataVec = _mm256_setzero_si256();
+    __m256i orVec = _mm256_setzero_si256();
+    const  __m256i shiftMask = _mm256_setr_epi16(16,1,16,1,16,1,16,1,16,1,16,1,16,1,16,1);
+    const __m256i orMask = _mm256_setr_epi8(0,0,0,0xFF,0,0,0,0xFF,0,0,0,0xFF,0,0,0,0xFF,
+                                                                        0,0,0,0xFF,0,0,0,0xFF,0,0,0,0xFF,0,0,0,0xFF);
+    const __m256i orShuffle = _mm256_setr_epi8(3,0,1,2,7,4,5,6,11,8,9,10,15,12,13,14,
+                                                                            3,0,1,2,7,4,5,6,11,8,9,10,15,12,13,14);
+    const __m256i bigEndianMask = _mm256_setr_epi8(1,0,2,5,4,6,9,8,10,13,12,14,3,7,11,15,
+                                                                                                  1,0,2,5,4,6,9,8,10,13,12,14,3,7,11,15);//按大端模式重排字节顺序
+    const __m256i littleEndianMask = _mm256_setr_epi8(0,1,5,2,6,4,8,9,13,10,14,12,3,7,11,15,
+                                                                                                    0,1,5,2,6,4,8,9,13,10,14,12,3,7,11,15);//按小端模式重排字节顺序
 
+    __m256i permutexMask = _mm256_setr_epi32(0,1,2,4,5,6,3,7);
+    while (begin + chunkLeng <= end)
+    {
+        dataVec = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(begin));
+        dataVec = _mm256_mullo_epi16(dataVec,shiftMask);//用乘法代替左移运算
+        orVec = _mm256_setzero_si256();//将或运算寄存器置零
+        orVec = _mm256_blendv_epi8(orVec,dataVec,orMask);//提取指定位上的8bit数据
+        orVec = _mm256_shuffle_epi8(orVec,orShuffle);//洗牌之后需要合并的bit位已经在目标位置上了,直接跟源寄存器做或运算
+        dataVec = _mm256_or_si256(dataVec,orVec);//求或运算完成数据拼接
+        dataVec = _mm256_shuffle_epi8(dataVec,bigEndianMask);//对拼接好的数据重新排序,可以自行选择大端排序或者小端排序
+        dataVec = _mm256_permutevar8x32_epi32(dataVec,permutexMask);//将拼接好的数据放到寄存器前面,无效数据放到寄存器最后
+        _mm256_storeu_si256(reinterpret_cast<__m256i*>(output),dataVec);
+
+        //实际上这里写入了12字节的无效数据,所以这里output指针只跳过24
+        output += std::size_t(chunkLeng*1.5);//写入到output数组中的数据是24字节
+        begin += chunkLeng;//输入数组跳过16个
+    }
+
+    //最后处理无法使用AVX指令处理的数据
+    compressShort12Bit(begin,end,output);
 }
 
 ///这个函数在仅在当前文件中被调用,因此可以保证inputBegin地址是按32字节对齐的,所以这里不需要额外处理未对齐的数据
