@@ -5,6 +5,7 @@
 #include "UtilitySubSystem/AwgUtility.h"
 #include "UtilitySubSystem/ThreadPool.hpp"
 #include "UtilitySubSystem/fastfloat/fast_float.h"
+#include "UtilitySubSystem/fmt/format.h"
 
 std::mutex FileMutex;
 
@@ -112,6 +113,60 @@ void generateTxt()
 
     // 关闭文件
     outFile.close();
+}
+
+void Awg::storeBinFile(const QString &path)
+{
+
+}
+
+void Awg::storeCsvFile(const QString &path,const AwgShortArray& data)
+{
+    QFile file(path);
+    if(file.open(QIODevice::ReadWrite|QIODevice::Truncate))
+    {
+        //首先预估文件大小,假设short数组每一个数都是-32768
+        //那么每一个数写入到csv文件之后需要占用-32768/r/n字节(8字节)长度(因为这是单行的,所以不需要计算逗号的长度)
+        const std::size_t rowLen = 8;
+        const std::size_t fileSize = data.size() * rowLen;
+        if(file.resize(fileSize))
+        {
+            //根据当前内存使用情况规划线程数和线程处理的内存块大小避免写入文件的时候内存耗尽
+            const std::size_t freeMemory = Awg::getFreeMemoryWindows() * 0.9;
+            const std::size_t averageSize = freeMemory / Awg::PoolSize;
+            const std::size_t chunkSize = averageSize > Awg::MinFileChunk ? averageSize : Awg::MinFileChunk;
+            //根据每一个线程可以处理的最大内存长度计算每一个线程可以处理的数据长度
+            const std::size_t chunkLen = chunkSize / rowLen;
+
+            std::vector<std::size_t> chunkVec = Awg::cutArrayMax(data.size(),chunkLen);
+            auto task = [](Awg::DT* beg,Awg::DT* end)->std::string
+            {
+                std::string ret;
+                ret.reserve((end-beg)*rowLen);
+
+                while (beg < end)
+                {
+                    std::string s = fmt::to_string(*beg);
+                    ++beg;
+                }
+                return ret;
+            };
+            //先在各个线程中将数字转换为字符串,才能确定每个数据块写入文件时的起始位置
+        }
+        else
+        {
+            std::cout<<"sssssssssssss";
+        }
+    }
+    else
+    {
+        std::cout<<"ddddddddddddd";
+    }
+}
+
+void Awg::stroeTxtFile(const QString& path)
+{
+
 }
 
 AwgShortArray Awg::loadBinFile(const QString &path)

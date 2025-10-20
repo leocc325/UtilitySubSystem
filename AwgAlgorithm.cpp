@@ -365,7 +365,7 @@ AwgShortArray Awg::generateOverviewTp(const Awg::DT *data, const std::size_t len
         };
 
         //按分出来的组groupVec划分到线程池中,计算每一个线程处理多少组数据
-        std::vector<std::size_t> threadGroups = Awg::cutArray(Awg::MaxPlotPoints,500);
+        std::vector<std::size_t> threadGroups = Awg::cutArrayMin(Awg::MaxPlotPoints,500);
         ThreadPool* pool = Awg::globalThreadPool();
         std::size_t startIndex = 0;
         for(std::size_t i = 0; i < threadGroups.size(); i++)
@@ -413,7 +413,7 @@ AwgShortArray Awg::generateSin(double sampleRate, double frequency, double phase
     
     //每一个线程处理的点数为总点数/线程数再向上取整
     std::size_t index = 0;
-    std::vector<std::size_t> chunks = Awg::cutArray(totalPoints,Awg::MinArrayLength);
+    std::vector<std::size_t> chunks = Awg::cutArrayMin(totalPoints,Awg::MinArrayLength);
     ThreadPool* pool = Awg::globalThreadPool();
     for(std::size_t i = 0; i < chunks.size(); i++)
     {
@@ -452,7 +452,7 @@ AwgShortArray Awg::generateSquare(double sampleRate, double frequency, double du
 
     //每一个线程处理的点数为总点数/线程数再向上取整
     std::size_t index = 0;
-    std::vector<std::size_t> chunks = Awg::cutArray(totalPoints,Awg::MinArrayLength);
+    std::vector<std::size_t> chunks = Awg::cutArrayMin(totalPoints,Awg::MinArrayLength);
     ThreadPool* pool = Awg::globalThreadPool();
     for(std::size_t i = 0; i < chunks.size(); i++)
     {
@@ -521,7 +521,7 @@ AwgShortArray Awg::generateTriangle(double sampleRate, double frequency, double 
 
     //每一个线程处理的点数为总点数/线程数再向上取整
     std::size_t index = 0;
-    std::vector<std::size_t> chunks = Awg::cutArray(totalPoints,Awg::MinArrayLength);
+    std::vector<std::size_t> chunks = Awg::cutArrayMin(totalPoints,Awg::MinArrayLength);
     ThreadPool* pool = Awg::globalThreadPool();
     for(std::size_t i = 0; i < chunks.size(); i++)
     {

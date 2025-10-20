@@ -44,7 +44,10 @@ namespace Awg
     std::vector<std::size_t> cutBinaryFile(const std::size_t fileSize,const std::size_t minChunk,const unsigned dataBytes) noexcept;
 
     ///根据线程池线程数将一个长度为length块切割成若干个大小至少为minChunk的小数组,返回这些数组的长度
-    std::vector<std::size_t> cutArray(std::size_t length,std::size_t minChunk) noexcept;
+    std::vector<std::size_t> cutArrayMin(std::size_t length,std::size_t minChunk) noexcept;
+
+    ///将一个长度为length块切割成若干个大小至多为maxChunk的小数组,返回这些数组的长度
+    std::vector<std::size_t> cutArrayMax(std::size_t length,std::size_t maxChunk) noexcept;
 
     ///根据线程池线程数将一个长度为length块切割成若干个大小至少为minChun而且为aligned整倍数的小数组,返回这些数组的长度
     std::vector<std::size_t> cutArrayAligned(std::size_t length,std::size_t minChunk,std::size_t aligned) noexcept;

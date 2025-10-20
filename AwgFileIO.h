@@ -34,7 +34,7 @@ namespace Awg
 
     void storeBinFile(const QString& path);
 
-    void storeCsvFile(const QString& path);
+    void storeCsvFile(const QString& path, const AwgShortArray& data);
 
     void stroeTxtFile(const QString& path);
 

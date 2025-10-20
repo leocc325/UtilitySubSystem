@@ -196,8 +196,11 @@ std::vector<std::size_t> Awg::cutBinaryFile(const std::size_t fileSize, const st
     return vec;
 }
 
-std::vector<std::size_t> Awg::cutArray(std::size_t length, std::size_t minChunk) noexcept
+std::vector<std::size_t> Awg::cutArrayMin(std::size_t length, std::size_t minChunk) noexcept
 {
+    if(length == 0 || minChunk == 0)
+        return std::vector<std::size_t>{};
+
     //判断目标size均摊到各个线程中的大小和minChunk谁更大
     std::size_t averageSize = length / Awg::PoolSize;
     std::size_t chunkSize = std::max(minChunk , averageSize);
@@ -225,8 +228,30 @@ std::vector<std::size_t> Awg::cutArray(std::size_t length, std::size_t minChunk)
     return vec;
 }
 
+std::vector<std::size_t> Awg::cutArrayMax(std::size_t length, std::size_t maxChunk) noexcept
+{
+    if(length == 0 || maxChunk == 0)
+        return std::vector<std::size_t>{};
+
+    std::vector<std::size_t> vec;
+    std::size_t vecSize = std::ceil( double(length) / maxChunk);
+    vec.reserve(vecSize);
+
+    for(std::size_t i = 0; i < vecSize; i++)
+    {
+        if(i < vecSize - 1)
+            vec.push_back(maxChunk);
+        else
+            vec.push_back(length%maxChunk);
+    }
+    return vec;
+}
+
 std::vector<std::size_t> Awg::cutArrayAligned(std::size_t length,std::size_t minChunk,std::size_t aligned)  noexcept
 {
+    if(length == 0 || minChunk == 0)
+        return std::vector<std::size_t>{};
+
     //判断目标size均摊到各个线程中的大小和minChunk谁更大
     std::size_t averageSize = length / Awg::PoolSize;
     std::size_t chunkSize = std::max(minChunk , averageSize);
