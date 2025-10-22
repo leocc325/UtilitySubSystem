@@ -2,169 +2,100 @@
 #include <iostream>
 #include <fstream>
 #include <QFile>
+
+#include "UtilitySubSystem/AwgFileIOprivate.hpp"
 #include "UtilitySubSystem/AwgUtility.h"
 #include "UtilitySubSystem/ThreadPool.hpp"
 #include "UtilitySubSystem/fastfloat/fast_float.h"
-#include "UtilitySubSystem/fmt/format.h"
+
 
 std::mutex FileMutex;
 
-void generateBin()
-{
-    const int64_t MAX_NUMBER = 1000000000; // 10亿
-    const size_t BUFFER_SIZE = 1000000;    // 缓冲区大小：100万个整数（约4MB）
-
-    std::cout << "Generating binary file with integers from 1 to " << MAX_NUMBER << std::endl;
-    std::cout << "Estimated file size: " << (MAX_NUMBER * sizeof(int32_t) / (1024.0 * 1024.0 * 1024.0))
-              << " GB" << std::endl;
-
-    auto start_time = std::chrono::high_resolution_clock::now();
-
-    std::ofstream outfile("D:/Desktop/testData1G.bin", std::ios::binary);
-    if (!outfile) {
-        std::cerr << "Error: Could not open file for writing!" << std::endl;
-        return;
-    }
-
-    std::vector<int32_t> buffer;
-    buffer.reserve(BUFFER_SIZE);
-
-    int64_t current = 0;
-    int64_t percent_step = MAX_NUMBER / 100;
-    int last_percent = -1;
-
-    while (current < MAX_NUMBER) {
-        // 填充缓冲区
-        buffer.clear();
-        for (size_t i = 0; i < BUFFER_SIZE && current <= MAX_NUMBER; ++i, ++current) {
-            buffer.push_back(static_cast<int32_t>(current));
-        }
-
-        // 写入缓冲区内容
-        outfile.write(reinterpret_cast<const char*>(buffer.data()),
-                      buffer.size() * sizeof(int32_t));
-
-        // 显示进度
-        int percent = static_cast<int>((current * 100) / MAX_NUMBER);
-        if (percent != last_percent && percent % 5 == 0) {
-            std::cout << "Progress: " << percent << "%" << std::endl;
-            last_percent = percent;
-        }
-    }
-
-    outfile.close();
-}
-
-void generateCsv()
-{
-    const int totalRows = 1000; // 1000万行
-    const std::string filename = "D:/Desktop/testData1k.csv";
-
-    // 打开文件
-    std::ofstream outFile(filename,std::ios::trunc);
-    if (!outFile.is_open()) {
-        std::cerr << "无法创建文件: " << filename << std::endl;
-        return;
-    }
-
-    // 设置输出格式
-    outFile << std::fixed;
-
-    std::cout << "正在生成 " << totalRows << " 行数据..." << std::endl;
-
-    // 生成CSV数据
-    for (int i = 0; i < totalRows; ++i) {
-        outFile << i;
-
-        // 如果不是最后一行，添加换行符
-        if (i < totalRows - 1) {
-            outFile << "\n";
-        }
-    }
-
-    // 关闭文件
-    outFile.close();
-}
-
-void generateTxt()
-{
-    const int totalRows = 1000000000; // 1000万行
-    const std::string filename = "D:/Desktop/testData1G.txt";
-
-    // 打开文件
-    std::ofstream outFile(filename,std::ios::trunc);
-    if (!outFile.is_open()) {
-        std::cerr << "无法创建文件: " << filename << std::endl;
-        return;
-    }
-
-    // 设置输出格式
-    outFile << std::fixed;
-
-    // 生成Txt数据
-    for (int i = 0; i < totalRows; ++i) {
-        outFile << i;
-
-        // 如果不是最后一行，添加换行符
-        if (i < totalRows - 1) {
-            outFile << "\n";
-        }
-    }
-
-    // 关闭文件
-    outFile.close();
-}
-
-void Awg::storeBinFile(const QString &path)
+void Awg::storeBinFile(const QString &path, const Awg::DT *array, const std::size_t length)
 {
 
 }
 
-void Awg::storeCsvFile(const QString &path,const AwgShortArray& data)
+void Awg::storeCsvFile(const QString &path, const Awg::DT *array, const std::size_t length)
 {
     QFile file(path);
-    if(file.open(QIODevice::ReadWrite|QIODevice::Truncate))
+    const int rowLength = (Awg::ArithmeticLengthSum<Awg::DT>::value + Awg::NewLine.size());
+    ThreadPool* pool =  Awg::globalThreadPool();
+    if(file.resize(rowLength * length))
     {
-        //首先预估文件大小,假设short数组每一个数都是-32768
-        //那么每一个数写入到csv文件之后需要占用-32768/r/n字节(8字节)长度(因为这是单行的,所以不需要计算逗号的长度)
-        const std::size_t rowLen = 8;
-        const std::size_t fileSize = data.size() * rowLen;
-        if(file.resize(fileSize))
+        if(file.open(QIODevice::ReadWrite|QIODevice::Truncate))
         {
-            //根据当前内存使用情况规划线程数和线程处理的内存块大小避免写入文件的时候内存耗尽
-            const std::size_t freeMemory = Awg::getFreeMemoryWindows() * 0.9;
-            const std::size_t averageSize = freeMemory / Awg::PoolSize;
-            const std::size_t chunkSize = averageSize > Awg::MinFileChunk ? averageSize : Awg::MinFileChunk;
-            //根据每一个线程可以处理的最大内存长度计算每一个线程可以处理的数据长度
-            const std::size_t chunkLen = chunkSize / rowLen;
+            //获取当前内存大小计算每一次可以转换为字符串的数据的总长度
+            const std::size_t freeMem = Awg::getFreeMemoryWindows() * 0.9;
+            const std::size_t lineLength = ArithmeticLengthSum<short>::value + NewLine.size();
+            const std::size_t menLenth = freeMem / lineLength;
 
-            std::vector<std::size_t> chunkVec = Awg::cutArrayMax(data.size(),chunkLen);
-            auto task = [](Awg::DT* beg,Awg::DT* end)->std::string
+            //根据实际数据长度和最大处理长度确定每一轮计算能处理的实际长度
+            const std::size_t maxStepLenth = std::min(menLenth,length);
+            //根据每一轮计算能处理的最大数据长度计算每一个线程需要处理的数据长度,但是不让每个线程能处理的数据长度小于最小长度限制
+            const std::size_t taskLen = (maxStepLenth/Awg::PoolSize) < Awg::MinArrayLength ? Awg::MinArrayLength : (maxStepLenth/Awg::PoolSize);
+            //根据计算得到的每一个线程的数据长度划分线程任务
+            std::vector<std::size_t> pointsVec = Awg::cutArrayMax(length,taskLen);
+            //计算线程池每一轮能执行的任务数量
+            const std::size_t taskNumOnce = std::min(unsigned(Awg::PoolSize),unsigned(pointsVec.size()));
+            //根据每一轮能执行的任务数量创建相应的缓冲区保存转换结果
+            std::vector<std::future<std::pair<char*,char*>>> futures;
+            std::vector<std::unique_ptr<char[]>> buffers(taskNumOnce);
+            for(std::size_t i = 0; i < buffers.size(); i++)
+                buffers.at(i) = std::make_unique<char[]>(rowLength);
+
+            std::size_t fileOffset = 0;
+            std::size_t dataIndex = 0;
+            //和读取文本文件不同的是,每一个线程处理完数据之后写入到文件的位置是不确定的,所以不能直接让各个线程自行运行,必须等待前一轮任务处理完毕之后才能处理后一轮任务
+            for(std::size_t i = 0; i < pointsVec.size(); i++)
             {
-                std::string ret;
-                ret.reserve((end-beg)*rowLen);
-
-                while (beg < end)
+                //每一轮任务的最大数量为线程池的大小,同时也确保任务索引不会超过总的数量
+                for(std::size_t j = 0; j < taskNumOnce && i < pointsVec.size(); i++,j++)
                 {
-                    std::string s = fmt::to_string(*beg);
-                    ++beg;
+                    std::future<std::pair<char*,char*>> future = pool->run(&Awg::toBinaryCsv<short>,buffers.at(i).get(),pointsVec.at(i),array+dataIndex);
+                    futures.push_back(std::move(future));
+                    dataIndex += pointsVec.at(i);
                 }
-                return ret;
-            };
-            //先在各个线程中将数字转换为字符串,才能确定每个数据块写入文件时的起始位置
+                pool->waitforDone();
+
+                //线程执行完毕之后提取线程执行结果,计算转换为字符串的总长度
+                std::size_t totalSize = 0;
+                std::vector<std::pair<char*,char*>> result;
+                for(std::size_t k = 0; k < futures.size(); k++)
+                {
+                    result.push_back(futures.at(k).get());
+                    totalSize += result.back().second - result.back().first;
+                }
+
+                //将文件从上一次写入的位置处映射,映射长度为这一次转换的长度
+                unsigned char* buf = file.map(fileOffset,totalSize);
+                std::size_t mapOffset = 0;
+                for(std::size_t k = 0; k < result.size(); k++)
+                {
+                    char* start = result.at(k).first;
+                    std::size_t mapSize = result.at(i).second - start;
+                    memcpy(buf+mapOffset,start,mapSize);
+
+                    //更新映射偏置和文件偏置
+                    mapOffset += mapSize;
+                    mapOffset += mapSize;
+                }
+                file.unmap(buf);
+                futures.clear();
+            }
         }
         else
         {
-            std::cout<<"sssssssssssss";
+            std::cout<<"file open failed";
         }
     }
     else
     {
-        std::cout<<"ddddddddddddd";
+        std::cout<<"file resize failed";
     }
 }
 
-void Awg::stroeTxtFile(const QString& path)
+void Awg::storeTxtFile(const QString &path, const Awg::DT *array, const std::size_t length)
 {
 
 }

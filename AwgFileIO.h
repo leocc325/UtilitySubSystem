@@ -5,9 +5,8 @@
 #include "AwgArray.hpp"
 #endif
 
-class QString;
 class QFile;
-
+class QString;
 namespace Awg
 {
 /**
@@ -26,17 +25,12 @@ namespace Awg
      *
      * 文件加载不需要根据大小区分不同的接口,接口内部会自动根据文件大小划分任务
     */
-    void generateBin();
 
-    void generateCsv();
+    void storeBinFile(const QString& path,const Awg::DT* array,const std::size_t length);
 
-    void generateTxt();
+    void storeCsvFile(const QString& path,const Awg::DT* array,const std::size_t length);
 
-    void storeBinFile(const QString& path);
-
-    void storeCsvFile(const QString& path, const AwgShortArray& data);
-
-    void stroeTxtFile(const QString& path);
+    void storeTxtFile(const QString& path,const Awg::DT* array,const std::size_t length);
 
     AwgShortArray loadBinFile(const QString& path);
 
