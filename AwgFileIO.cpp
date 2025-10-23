@@ -15,15 +15,18 @@ void Awg::storeBinFile(const QString &path, const Awg::DT *array, const std::siz
 {
 
 }
-
+#include <QDebug>
+#include <QElapsedTimer>
+QElapsedTimer timer;
 void Awg::storeCsvFile(const QString &path, const Awg::DT *array, const std::size_t length)
 {
     QFile file(path);
     const int rowLength = (Awg::ArithmeticLengthSum<Awg::DT>::value + Awg::NewLine.size());
     ThreadPool* pool =  Awg::globalThreadPool();
+    timer.restart();
     if(file.resize(rowLength * length))
     {
-        if(file.open(QIODevice::ReadWrite|QIODevice::Truncate))
+        if(file.open(QIODevice::ReadWrite))
         {
             //获取当前内存大小计算每一次可以转换为字符串的数据的总长度
             const std::size_t freeMem = Awg::getFreeMemoryWindows() * 0.9;
@@ -33,7 +36,7 @@ void Awg::storeCsvFile(const QString &path, const Awg::DT *array, const std::siz
             //根据实际数据长度和最大处理长度确定每一轮计算能处理的实际长度
             const std::size_t maxStepLenth = std::min(menLenth,length);
             //根据每一轮计算能处理的最大数据长度计算每一个线程需要处理的数据长度,但是不让每个线程能处理的数据长度小于最小长度限制
-            const std::size_t taskLen = (maxStepLenth/Awg::PoolSize) < Awg::MinArrayLength ? Awg::MinArrayLength : (maxStepLenth/Awg::PoolSize);
+            const std::size_t taskLen = std::max( std::size_t(Awg::MinArrayLength) , std::size_t(maxStepLenth/Awg::PoolSize)) ;
             //根据计算得到的每一个线程的数据长度划分线程任务
             std::vector<std::size_t> pointsVec = Awg::cutArrayMax(length,taskLen);
             //计算线程池每一轮能执行的任务数量
@@ -42,14 +45,16 @@ void Awg::storeCsvFile(const QString &path, const Awg::DT *array, const std::siz
             std::vector<std::future<std::pair<char*,char*>>> futures;
             std::vector<std::unique_ptr<char[]>> buffers(taskNumOnce);
             for(std::size_t i = 0; i < buffers.size(); i++)
-                buffers.at(i) = std::make_unique<char[]>(rowLength);
+                buffers.at(i) = std::make_unique<char[]>(rowLength * taskLen);
 
             std::size_t fileOffset = 0;
+            std::size_t totalSize = 0;
             std::size_t dataIndex = 0;
             //和读取文本文件不同的是,每一个线程处理完数据之后写入到文件的位置是不确定的,所以不能直接让各个线程自行运行,必须等待前一轮任务处理完毕之后才能处理后一轮任务
             for(std::size_t i = 0; i < pointsVec.size(); i++)
             {
                 //每一轮任务的最大数量为线程池的大小,同时也确保任务索引不会超过总的数量
+                timer.restart();
                 for(std::size_t j = 0; j < taskNumOnce && i < pointsVec.size(); i++,j++)
                 {
                     std::future<std::pair<char*,char*>> future = pool->run(&Awg::toBinaryCsv<short>,buffers.at(i).get(),pointsVec.at(i),array+dataIndex);
@@ -57,32 +62,40 @@ void Awg::storeCsvFile(const QString &path, const Awg::DT *array, const std::siz
                     dataIndex += pointsVec.at(i);
                 }
                 pool->waitforDone();
+                qDebug()<<"task:"<<timer.elapsed();
 
                 //线程执行完毕之后提取线程执行结果,计算转换为字符串的总长度
-                std::size_t totalSize = 0;
+                std::size_t outputSize = 0;
                 std::vector<std::pair<char*,char*>> result;
                 for(std::size_t k = 0; k < futures.size(); k++)
                 {
                     result.push_back(futures.at(k).get());
-                    totalSize += result.back().second - result.back().first;
+                    outputSize += result.back().second - result.back().first;
                 }
 
                 //将文件从上一次写入的位置处映射,映射长度为这一次转换的长度
-                unsigned char* buf = file.map(fileOffset,totalSize);
+                timer.restart();
+                unsigned char* buf = file.map(fileOffset,outputSize);
                 std::size_t mapOffset = 0;
                 for(std::size_t k = 0; k < result.size(); k++)
                 {
                     char* start = result.at(k).first;
-                    std::size_t mapSize = result.at(i).second - start;
+                    std::size_t mapSize = result.at(k).second - start;
                     memcpy(buf+mapOffset,start,mapSize);
 
                     //更新映射偏置和文件偏置
+                    fileOffset += mapSize;
                     mapOffset += mapSize;
-                    mapOffset += mapSize;
+                    totalSize += mapSize;
                 }
+                qDebug()<<"write:"<<timer.elapsed();
                 file.unmap(buf);
                 futures.clear();
             }
+            timer.start();
+            file.close();
+            file.resize(totalSize);
+            qDebug()<<"resize:"<<timer.elapsed();
         }
         else
         {

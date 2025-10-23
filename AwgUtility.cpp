@@ -237,13 +237,15 @@ std::vector<std::size_t> Awg::cutArrayMax(std::size_t length, std::size_t maxChu
     std::size_t vecSize = std::ceil( double(length) / maxChunk);
     vec.reserve(vecSize);
 
+    std::size_t remaining = length;
+
     for(std::size_t i = 0; i < vecSize; i++)
     {
-        if(i < vecSize - 1)
-            vec.push_back(maxChunk);
-        else
-            vec.push_back(length%maxChunk);
+        std::size_t currentChunk = std::min(remaining, maxChunk);
+        vec.push_back(currentChunk);
+        remaining -= currentChunk;
     }
+
     return vec;
 }
 

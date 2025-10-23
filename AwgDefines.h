@@ -12,7 +12,7 @@ namespace Awg
     constexpr unsigned FPGAbits = 12;
 
     ///线程池大小,建议将这个值设置为核心数-2,预留两个核心给操作系统
-    constexpr unsigned PoolSize = 4;
+    constexpr unsigned PoolSize = 8;
 
     ///数组字节对齐数
     constexpr int ArrayAlignment = 32;

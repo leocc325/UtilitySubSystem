@@ -156,7 +156,7 @@ namespace Awg {
     ///将指定的数组合集转换为txt格式的字符串并返回std::string
     /*template<typename...T>
     typename std::enable_if<IsArithmetic<T...>::value,std::string>::type
-    toBinaryTsv(const std::size_t length,const T*...Arrays)
+    toBinaryTxt(const std::size_t length,const T*...Arrays)
     {
         //计算数值转换为字符串之后每一行的长度:每一个数据的字符串长度和+分隔符数量(分隔符长度为1)+换行符长度。(实际上这里应该是分隔符-1)
         constexpr int lineLength = ArithmeticLengthSum<T...>::value + sizeof... (Arrays) + NewLine.size();
