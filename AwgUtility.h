@@ -5,11 +5,6 @@
 #include "AwgDefines.h"
 #endif
 
-#ifndef _GLIBCXX_VECTOR
-#include <vector>
-#endif
-
-class QFile;
 class ThreadPool;
 namespace Awg
 {
@@ -17,40 +12,7 @@ namespace Awg
     ThreadPool* globalThreadPool() noexcept;
 
     ///查询系统当前可用内存
-    std::size_t getFreeMemoryWindows();
-
-    ///判断字符c是否是浮点数的开头
-    bool isFloatBegin(char c) noexcept;
-
-    ///判断字符c是否是整数的开头
-    bool isIntegerBegin(char c) noexcept;
-
-    ///查找字符串中第一次出现字符target的位置
-    std::size_t findChar(const char* data,std::size_t leng,char target) noexcept;
-
-    ///使用SIMD指令查找字符串中第一次出现字符target的位置
-    std::size_t findCharAvx2(const char* data,std::size_t leng,char target) noexcept;
-
-    ///计算字符串中出现字符target的次数
-    std::size_t countChar(const char* data, std::size_t leng, char target) noexcept;
-
-     ///使用AVX2指令集计算字符串中出现字符target的次数
-    std::size_t countCharAvx2(const char* data,std::size_t leng,char target) noexcept;
-
-    ///根据线程池线程数将文本文件切割成若干个大小至少为minCunk的小内存块,同时保证里面的数据不被切割到不同的块中,返回每一个块的大小
-    std::vector<std::size_t> cutTextFile(QFile& file, std::size_t minChunk, const std::vector<char>& spliters);
-
-    ///根据线程池线程数将二进制文件切割成若干个大小至少为minCunk的小内存块,同时保证里面的数据不被切割到不同的块中,不同的块的大小为dataBytes的整倍数,返回每一个块的大小
-    std::vector<std::size_t> cutBinaryFile(const std::size_t fileSize,const std::size_t minChunk,const unsigned dataBytes) noexcept;
-
-    ///根据线程池线程数将一个长度为length块切割成若干个大小至少为minChunk的小数组,返回这些数组的长度
-    std::vector<std::size_t> cutArrayMin(std::size_t length,std::size_t minChunk) noexcept;
-
-    ///将一个长度为length块切割成若干个大小至多为maxChunk的小数组,返回这些数组的长度
-    std::vector<std::size_t> cutArrayMax(std::size_t length,std::size_t maxChunk) noexcept;
-
-    ///根据线程池线程数将一个长度为length块切割成若干个大小至少为minChun而且为aligned整倍数的小数组,返回这些数组的长度
-    std::vector<std::size_t> cutArrayAligned(std::size_t length,std::size_t minChunk,std::size_t aligned) noexcept;
+    unsigned long long getFreeMemoryWindows();
 }
 
 #endif // AWGUTILITY_H

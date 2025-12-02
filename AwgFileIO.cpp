@@ -5,6 +5,7 @@
 
 #include "UtilitySubSystem/AwgFileIOprivate.hpp"
 #include "UtilitySubSystem/AwgUtility.h"
+#include "UtilitySubSystem/AwgAlgorithm.h"
 #include "UtilitySubSystem/ThreadPool.hpp"
 #include "UtilitySubSystem/fastfloat/fast_float.h"
 
@@ -321,15 +322,14 @@ AwgShortArray Awg::processTextFile(QFile *file, std::size_t mapStart, std::size_
         return AwgShortArray{};
     }
 
-    const char* data = reinterpret_cast<const char*>(buf);
-    const char* start = reinterpret_cast<const char*>(data);
+    const char* start = reinterpret_cast<const char*>(buf);
     const char* end = start + mapSize;
 
     std::size_t index = 0;
     std::size_t arraySize = 1; //vector的容量比找到的分隔符数量多一个
     for(std::size_t i = 0; i < spliters.size(); i++)
     {
-        arraySize += Awg::countCharAvx2(data,mapSize,spliters[i]);
+        arraySize += Awg::countChar(start,end,spliters[i]);
     }
 
     //如果文本是以分隔符结尾或者开头,则让数组长度减1,因为开头的分隔符前面没有数据,结尾的分隔符后面也没有数据,这样可以准确地确定数组长度

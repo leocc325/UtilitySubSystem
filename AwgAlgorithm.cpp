@@ -2,7 +2,7 @@
 #include "UtilitySubSystem/AwgUtility.h"
 #include "UtilitySubSystem/ThreadPool.hpp"
 #include "AwgDefines.h"
-
+#include <QFile>
 #include <immintrin.h>
 #include <iostream>
 #include <algorithm>
@@ -40,6 +40,79 @@ namespace Awg{
         return result;
     }
     #endif
+
+    std::size_t countCharScalar(const char* beg, const char* end, char target) noexcept
+    {
+        std::size_t count = 0;
+        while (beg < end)
+        {
+            count += ( (*beg) == target );
+            ++beg;
+        }
+        return count;
+    }
+
+    std::size_t countCharAvx2(const char* beg, const char* end, char target) noexcept
+    {
+        const int step = 32;
+        std::size_t count = 0;
+        // 处理不对齐的部分,_mm256_load_si256 需要32字节对齐地址,否则会引发错误。
+        while (reinterpret_cast<uintptr_t>(beg) % step != 0 && beg < end)
+        {
+            count += (*beg == target);
+            ++beg;
+        }
+
+        __m256i targetChar = _mm256_set1_epi8(target);
+        while (beg + step <= end)
+        {
+            __m256i chunk = _mm256_load_si256(reinterpret_cast<const __m256i*>(beg));
+            __m256i cmp = _mm256_cmpeq_epi8(chunk,targetChar);
+            int mask = _mm256_movemask_epi8(cmp);
+
+            count += __builtin_popcount(mask);
+            beg += step;
+        }
+
+        // 处理剩余的不够32字节的部分
+        return count + countCharScalar(beg,end,target);
+    }
+
+    std::size_t findCharScalar(const char *beg, const char *end, char target) noexcept
+    {
+        std::size_t index = 0;
+        while (beg < end)
+        {
+            index += ((*beg) == target);
+            ++beg;
+        }
+        return index;
+    }
+
+    std::size_t findCharAvx2(const char *beg, const char *end, char target) noexcept
+    {
+        const std::size_t step = 32;
+        std::size_t index = 0;
+
+        __m256i mask = _mm256_set1_epi8(target);
+        while (beg + step <= end)
+        {
+            __m256i chunk = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(beg));
+            __m256i cmpRet = _mm256_cmpeq_epi8(chunk,mask);
+            int maskRet = _mm256_movemask_epi8(cmpRet);
+
+            if(maskRet == 0)
+            {
+                beg += step;
+                index  += 32;
+            }
+            else
+                return __builtin_ctz(maskRet) + index ;
+        }
+
+        index += findChar(beg,end,target);
+        return index;
+    }
 
     const short* minAvx2(const short *begin, const short *end)
     {
@@ -390,6 +463,47 @@ namespace Awg{
             outputTriangleScalar(raiseK,raiseB,fallK,fallB,output,peak,beg,end);
         }
     }
+
+}
+
+bool Awg::isFloatBegin(char c) noexcept
+{
+    // 数字、小数点、正负号都可能是浮点数的开头
+    return ( (c >= '0' && c <= '9') || c == '-' || c == '.' );
+}
+
+bool Awg::isIntegerBegin(char c) noexcept
+{
+    // 数字、正负号都可能是浮点数的开头
+    return ( (c >= '0' && c <= '9') || c == '-'  );
+}
+
+std::size_t Awg::countChar(const char *beg, const char *end, char target) noexcept
+{
+#ifdef __AVX2__
+    return Awg::countCharAvx2(beg,end,target);
+#else
+    return Awg::countCharScalar(beg,end,target);
+#endif
+}
+
+std::size_t Awg::countCharMT(const char *beg, const char *end, char target) noexcept
+{
+
+}
+
+std::size_t Awg::findChar(const char *beg, const char *end, char target) noexcept
+{
+#ifdef __AVX2__
+    return Awg::findCharAvx2(beg,end,target);
+#else
+    return Awg::findCharScalar(beg,end,target);
+#endif
+}
+
+std::size_t Awg::findCharMT(const char *beg, const char *end, char target) noexcept
+{
+
 }
 
 const short *Awg::min(const short *begin, const short *end)
@@ -401,7 +515,7 @@ const short *Awg::min(const short *begin, const short *end)
 #endif
 }
 
-const short *max(const short *begin, const short *end)
+const short* Awg::max(const short *begin, const short *end)
 {
 #ifdef __AVX2__
     return Awg::maxAvx2(begin,end);
@@ -410,7 +524,16 @@ const short *max(const short *begin, const short *end)
 #endif
 }
 
-std::pair<const short *, const short *> minmax(const short *begin, const short *end)
+std::pair<const short *, const short *> Awg::minmax(const short *begin, const short *end)
+{
+#ifdef __AVX2__
+        return Awg::minmaxAvx2(begin,end);
+#else
+    return std::minmax_element(begin,end);
+#endif
+}
+
+std::pair<const short *, const short *> Awg::minmaxMT(const short *begin, const short *end)
 {
     std::size_t dataLen = end - begin + 1;
     std::vector<std::size_t> threadChunks = Awg::cutArrayAligned(dataLen,Awg::MinArrayLength,Awg::ArrayAlignment/sizeof (short));
@@ -450,6 +573,22 @@ void Awg::compressShort12Bit(const short *begin, const short *end, char *output)
 }
 
 AwgDoubleArray Awg::normalization(const AwgDoubleArray &input, const double inputMin, const double inputMax, const double outputMin, const double outputMax)
+{
+    if(input.empty())
+        return AwgDoubleArray{};
+
+    AwgDoubleArray output(input.size());
+    const double* inputBeg = input.data();
+    double* outputBeg = output.data();
+#ifdef __AVX2__
+    Awg::normalizationAvx2(inputBeg,inputBeg+input.size(),outputBeg,inputMin,inputMax,outputMin,outputMax);
+#else
+    Awg::normalizationScalar(inputBeg,inputBeg+input.size(),outputBeg,inputMin,inputMax,outputMin,outputMax);
+#endif
+    return output;
+}
+
+AwgDoubleArray Awg::normalizationMT(const AwgDoubleArray &input, const double inputMin, const double inputMax, const double outputMin, const double outputMax)
 {
     if(input.empty())
         return AwgDoubleArray{};
@@ -513,6 +652,66 @@ AwgShortArray Awg::generateOverview(const Awg::DT *data, const std::size_t lengt
             begin += groupVec.at(i);
         }
 
+        std::size_t index = 0;
+        auto groupBeg = iteratorGroups.begin();
+        auto groupEnd = iteratorGroups.end();
+        while(groupBeg < groupEnd)
+        {
+            //开始计算每一组数据,找出每一个分组数据中的最大值和最小值,注意最大值最小值出现顺序,不可交换这两个值的顺序
+#ifdef __AVX2__
+            std::pair<const Awg::DT*,const Awg::DT*> result = Awg::minmaxAvx2((*groupBeg).first,(*groupBeg).second);
+#else
+            std::pair<const Awg::DT*,const Awg::DT*> result = std::minmax_element((*groupBeg).first,(*groupBeg).second);
+#endif
+            buf[2*index] = (result.first < result.second) ? (*result.first) : (*result.second);
+            buf[2*index+1] = (result.first < result.second) ? (*result.second) : (*result.first);
+
+            ++groupBeg;
+            ++index;
+        }
+
+        return buf;
+    }
+}
+
+AwgShortArray Awg::generateOverviewMT(const Awg::DT *data, const std::size_t length)
+{
+    if(length <= Awg::MaxPlotPoints)
+    {
+        //数据点数不超过最大限制时直接返回传入的数据
+        AwgShortArray buf(length);
+        memcpy(buf,data,sizeof (Awg::DT)*length);
+        return buf;
+    }
+    else
+    {
+        //当数据点数超过最大限制时将数据点数压缩到最大限制值的两倍,将数据分为Awg::MaxPlotPoints分别处理
+        const std::size_t groupLength = length / Awg::MaxPlotPoints;
+        const std::size_t remainLength = groupLength % Awg::MaxPlotPoints;
+        AwgShortArray buf(Awg::MaxPlotPoints*2);
+
+        //计算要压缩的每一段数据长度
+        std::vector<std::size_t> groupVec;
+        groupVec.reserve(Awg::MaxPlotPoints);
+        for(std::size_t i = 0; i < Awg::MaxPlotPoints; i++)
+        {
+            //前面N组每一组多分一个点,确保多余出来的点被均匀分配
+            if(i < remainLength)
+                groupVec.push_back(groupLength + 1);
+            else
+                groupVec.push_back(groupLength);
+        }
+
+        //计算每一组数据的起始和结束指针
+        std::vector<std::pair<const Awg::DT*,const Awg::DT*>> iteratorGroups;
+        iteratorGroups.reserve(Awg::MaxPlotPoints);
+        const Awg::DT* begin = data;
+        for(std::size_t i = 0; i < Awg::MaxPlotPoints; i++)
+        {
+            iteratorGroups.emplace_back(begin,begin+groupVec.at(i));
+            begin += groupVec.at(i);
+        }
+
         //线程任务
         auto task = [&iteratorGroups,&buf](std::size_t startIndex,std::size_t endIndex)
         {
@@ -525,16 +724,8 @@ AwgShortArray Awg::generateOverview(const Awg::DT *data, const std::size_t lengt
 #else
                 std::pair<const Awg::DT*,const Awg::DT*> result = std::minmax_element(pair.first,pair.second);
 #endif
-                if(result.first < result.second)
-                {
-                    buf[2*i] = (*result.first);
-                    buf[2*i+1] = (*result.second);
-                }
-                else
-                {
-                    buf[2*i] = (*result.second);
-                    buf[2*i+1] =(*result.first);
-                }
+                buf[2*i] = (result.first < result.second) ? (*result.first) : (*result.second);
+                buf[2*i+1] = (result.first < result.second) ? (*result.second) : (*result.first);
             }
         };
 
@@ -552,6 +743,170 @@ AwgShortArray Awg::generateOverview(const Awg::DT *data, const std::size_t lengt
 
         return buf;
     }
+}
+
+std::vector<std::size_t> Awg::cutTextFile(QFile &file, std::size_t minChunk, const std::vector<char> &spliters)
+{
+    std::vector<std::size_t> vec;
+    if(file.isOpen())
+    {
+        //判断目标size均摊到各个线程中的大小和minChunk谁更大
+        std::size_t fileSize = file.size();
+        std::size_t chunkFile = fileSize / Awg::PoolSize;//文件均摊之后每一个线程需要处理的Size
+        std::size_t chunkThread = Awg::getFreeMemoryWindows()*0.9 / Awg::PoolSize / 2;//剩余内存能支持每一个线程处理文件的Size,这是为了避免多个线程同时加载文件导致内存耗尽,文件和数据加载之后需要占用两份内存,所以除以2
+        std::size_t chunkTemp = std::min(chunkFile,chunkThread);//初步计算得到的每个线程能处理的Size,文件均摊之后的Size大于线程支持的Size就以线程支持的Size为准,否则以文件均摊的Size为准
+        std::size_t chunkSize = std::max(minChunk,chunkTemp);//初步计算的到的Size如果小于最低的Size要求就以最低Size要求为准,这是为了避免体积太小的文件被切割成很多块并发处理反而会更慢
+
+        //按上方计算出来的chunkSize和分隔符分割文本文件
+        const std::size_t preReadLeng  = 64;//预读取长度
+        std::size_t index = 0;//映射起始地址
+
+        while (true)
+        {
+            if(fileSize - index < chunkSize * 1.5)
+            {
+                //允许最后一块的大小大于给定的chunkSize
+                vec.push_back(fileSize - index);
+                break;
+            }
+            else
+            {
+                std::size_t extraLeng = preReadLeng+1;//还需要读取额外extraLeng才能保证文本没有被切割到两个块中
+                unsigned char* data = file.map(index+chunkSize,preReadLeng);
+
+                //分隔符索引中非0的最小值就是需要实际额外读取的长度
+                for(std::size_t i = 0; i < spliters.size(); i++)
+                {
+                    const char* beg = reinterpret_cast<const char*>(data);
+                    const char* end = beg + preReadLeng;
+                    std::size_t pos = Awg::findChar(beg,end,spliters[i]);
+                    extraLeng = (pos != 0) ? std::min(extraLeng,pos) : extraLeng;
+                }
+
+                //如果最终的额外长度还是等于预读长度+1就说明在第一个字符处匹配成功或者全部字符都没有匹配成功
+                //这种情况下就不预读额外的字节数
+                extraLeng = (extraLeng == preReadLeng + 1) ? 0 : extraLeng;
+                vec.push_back(chunkSize+extraLeng);
+                index = index + chunkSize + extraLeng;
+
+                file.unmap(data);
+            }
+        }
+    }
+    return vec;
+}
+
+std::vector<std::size_t> Awg::cutBinaryFile(const std::size_t fileSize, const std::size_t minChunk, const unsigned dataBytes) noexcept
+{
+    std::size_t index = 0;//映射起始地址
+    std::size_t chunkFile = fileSize / Awg::PoolSize;//文件均摊之后每一个线程需要处理的Size
+    std::size_t chunkThread = Awg::getFreeMemoryWindows()*0.9 / Awg::PoolSize / 2;//剩余内存能支持每一个线程处理文件的Size,这是为了避免多个线程同时加载文件导致内存耗尽,文件和数据加载之后需要占用两份内存,所以除以2
+    std::size_t chunkTemp = std::min(chunkFile,chunkThread);//初步计算得到的每个线程能处理的Size,文件均摊之后的Size大于线程支持的Size就以线程支持的Size为准,否则以文件均摊的Size为准
+    std::size_t chunkSize = std::max(minChunk,chunkTemp);//初步计算的到的Size如果小于最低的Size要求就以最低Size要求为准,这是为了避免体积太小的文件被切割成很多块并发处理反而会更慢
+
+    std::vector<std::size_t> vec;
+    while (true)
+    {
+        if(fileSize - index < chunkSize * 1.5)
+        {
+            //允许最后一块的大小大于给定的chunkSize
+            vec.push_back(fileSize - index);
+            break;
+        }
+        else
+        {
+            std::size_t length = chunkSize + dataBytes -  chunkSize % dataBytes;
+            vec.push_back(length);
+            index += length;
+        }
+    }
+    return vec;
+}
+
+std::vector<std::size_t> Awg::cutArrayMin(std::size_t length, std::size_t minChunk) noexcept
+{
+    if(length == 0 || minChunk == 0)
+        return std::vector<std::size_t>{};
+
+    //判断目标size均摊到各个线程中的大小和minChunk谁更大
+    std::size_t averageSize = length / Awg::PoolSize;
+    std::size_t chunkSize = std::max(minChunk , averageSize);
+
+    //以上方计算出来的块大小分割
+    std::vector<std::size_t> vec;
+    std::size_t vecSize = std::ceil( double(length) / chunkSize);
+    vec.reserve(vecSize);
+
+    std::size_t index = 0;
+    while (index <= length)
+    {
+        if(length - index < chunkSize * 1.5)
+        {
+            //允许最后一块的大小大于给定的最小尺寸,避免最后一块剩下很少字节数
+            vec.push_back(length - index);
+            break;
+        }
+        else
+        {
+            vec.push_back(chunkSize);
+            index += chunkSize;
+        }
+    }
+    return vec;
+}
+
+std::vector<std::size_t> Awg::cutArrayMax(std::size_t length, std::size_t maxChunk) noexcept
+{
+    if(length == 0 || maxChunk == 0)
+        return std::vector<std::size_t>{};
+
+    std::vector<std::size_t> vec;
+    std::size_t vecSize = std::ceil( double(length) / maxChunk);
+    vec.reserve(vecSize);
+
+    std::size_t remaining = length;
+
+    for(std::size_t i = 0; i < vecSize; i++)
+    {
+        std::size_t currentChunk = std::min(remaining, maxChunk);
+        vec.push_back(currentChunk);
+        remaining -= currentChunk;
+    }
+
+    return vec;
+}
+
+std::vector<std::size_t> Awg::cutArrayAligned(std::size_t length,std::size_t minChunk,std::size_t aligned)  noexcept
+{
+    if(length == 0 || minChunk == 0)
+        return std::vector<std::size_t>{};
+
+    //判断目标size均摊到各个线程中的大小和minChunk谁更大
+    std::size_t averageSize = length / Awg::PoolSize;
+    std::size_t chunkSize = std::max(minChunk , averageSize);
+    chunkSize = chunkSize + aligned - chunkSize % aligned;
+
+    //以上方计算出来的块大小分割
+    std::vector<std::size_t> vec;
+    std::size_t vecSize = std::ceil( double(length) / chunkSize);
+    vec.reserve(vecSize);
+
+    std::size_t index = 0;
+    while (index <= length)
+    {
+        if(length - index < chunkSize * 1.5)
+        {
+            //允许最后一块的大小大于给定的最小尺寸,避免最后一块剩下很少字节数
+            vec.push_back(length - index);
+            break;
+        }
+        else
+        {
+            vec.push_back(chunkSize);
+            index += chunkSize;
+        }
+    }
+    return vec;
 }
 
 AwgShortArray Awg::generateSin(double sampleRate, double frequency, double phase)
