@@ -83,7 +83,10 @@ namespace Awg{
         std::size_t index = 0;
         while (beg < end)
         {
-            index += ((*beg) == target);
+            if(*beg == target)
+                return index;
+
+            ++index;
             ++beg;
         }
         return index;
@@ -110,7 +113,7 @@ namespace Awg{
                 return __builtin_ctz(maskRet) + index ;
         }
 
-        index += findChar(beg,end,target);
+        index += findCharScalar(beg,end,target);
         return index;
     }
 
@@ -478,7 +481,7 @@ bool Awg::isIntegerBegin(char c) noexcept
     return ( (c >= '0' && c <= '9') || c == '-'  );
 }
 
-std::size_t Awg::countChar(const char *beg, const char *end, char target) noexcept
+std::size_t Awg::countChar( const char *beg, const char *end, char target) noexcept
 {
 #ifdef __AVX2__
     return Awg::countCharAvx2(beg,end,target);
