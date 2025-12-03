@@ -9,38 +9,6 @@
 #include <cmath>
 
 namespace Awg{
-
-    #if __AVX2__
-    // 更精确的向量化sin函数,自定义的avx函数必须添加__attribute__,否则在有时候会崩溃,哪怕这个函数什么都不干
-    __inline __m256d __attribute__((__gnu_inline__, __always_inline__, __artificial__))
-    sinAvx2(const __m256d x)
-    {
-        const __m256d pi = _mm256_set1_pd(Awg::PI);
-        const __m256d half_pi = _mm256_set1_pd(0.5 * Awg::PI);
-        const __m256d inv_pi = _mm256_set1_pd(1.0 / Awg::PI);
-
-        // 范围缩减到 [-π/2, π/2]
-        __m256d x_mod = _mm256_sub_pd(x, _mm256_mul_pd(_mm256_round_pd(_mm256_mul_pd(x, inv_pi),
-                                                                       _MM_FROUND_TO_NEAREST_INT), pi));
-
-        // 使用更精确的多项式系数
-        const __m256d s1 = _mm256_set1_pd(-1.6666654611e-1);
-        const __m256d s2 = _mm256_set1_pd(8.3321608736e-3);
-        const __m256d s3 = _mm256_set1_pd(-1.9515295891e-4);
-
-        __m256d x2 = _mm256_mul_pd(x_mod, x_mod);
-        __m256d result = _mm256_mul_pd(x2, s3);
-        result = _mm256_add_pd(result, s2);
-        result = _mm256_mul_pd(result, x2);
-        result = _mm256_add_pd(result, s1);
-        result = _mm256_mul_pd(result, x2);
-        result = _mm256_mul_pd(result, x_mod);
-        result = _mm256_add_pd(result, x_mod);
-
-        return result;
-    }
-    #endif
-
     std::size_t countCharScalar(const char* beg, const char* end, char target) noexcept
     {
         std::size_t count = 0;
@@ -130,11 +98,14 @@ namespace Awg{
         {
             dataVec  = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(begin));//加载数据到寄存器
             cmpVec = _mm256_min_epi16(dataVec,minVec);//将加载到寄存器中的值和最小值寄存器中的值作比较
-            minMask = _mm256_cmpgt_epi8(minVec,cmpVec);//将比较结果和最小值寄存器做比较,判断是否产生了新的最小值
+            minMask = _mm256_cmpgt_epi16(minVec,cmpVec);//将比较结果和最小值寄存器做比较,判断是否产生了新的最小值
 
             //如果有新的最小值产生,则从这一组数据中找到最小值所在的索引
             if(_mm256_movemask_epi8(minMask))
+            {
                 min = std::min_element(begin,begin+chunkLeng);
+                minVec = _mm256_set1_epi16(*min);
+            }
             begin += chunkLeng;
         }
 
@@ -143,7 +114,7 @@ namespace Awg{
         else
         {
             const short* tmpMin = std::min_element(begin,end);
-            return *min < *tmpMin ? min : tmpMin;
+            return *min <= *tmpMin ? min : tmpMin;
         }
     }
 
@@ -160,11 +131,15 @@ namespace Awg{
         {
             dataVec  = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(begin));//加载数据到寄存器
             cmpVec = _mm256_max_epi16(dataVec,maxVec);//将加载到寄存器中的值和最大值寄存器中的值作比较
-            maxMask = _mm256_cmpgt_epi8(cmpVec,maxVec);//将比较结果和最大值寄存器做比较,判断是否产生了新的最大值
+            maxMask = _mm256_cmpgt_epi16(cmpVec,maxVec);//将比较结果和最大值寄存器做比较,判断是否产生了新的最大值
 
             //如果有新的最小值产生,则从这一组数据中找到最小值所在的索引
             if(_mm256_movemask_epi8(maxMask))
+            {
                 max = std::max_element(begin,begin+chunkLeng);
+                maxVec = _mm256_set1_epi16(*max);
+            }
+
             begin += chunkLeng;
         }
 
@@ -173,7 +148,7 @@ namespace Awg{
         else
         {
             const short* tmpMax = std::max_element(begin,end);
-            return *max > *tmpMax ? max : tmpMax;
+            return *max >= *tmpMax ? max : tmpMax;
         }
     }
 
@@ -194,13 +169,21 @@ namespace Awg{
             dataVec  = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(begin));
             cmpMinVec = _mm256_min_epi16(dataVec,minVec);
             cmpMaxVec = _mm256_max_epi16(dataVec,maxVec);
-            minMask = _mm256_cmpgt_epi8(minVec,cmpMinVec);
-            maxMask = _mm256_cmpgt_epi8(cmpMaxVec,maxVec);
+            minMask = _mm256_cmpgt_epi16(minVec,cmpMinVec);
+            maxMask = _mm256_cmpgt_epi16(cmpMaxVec,maxVec);
 
             if(_mm256_movemask_epi8(minMask))
+            {
                 min = std::min_element(begin,begin+chunkLeng);
+                minVec = _mm256_set1_epi16(*min);
+            }
+
             if(_mm256_movemask_epi8(maxMask))
-                max = std::max_element(begin,begin+chunkLeng);
+            {
+                 max = std::max_element(begin,begin+chunkLeng);
+                 maxVec = _mm256_set1_epi16(*max);
+            }
+
             begin += chunkLeng;
         }
 
@@ -209,8 +192,8 @@ namespace Awg{
         else
         {
             std::pair<const short *, const short *> ret = std::minmax_element(begin,end);
-            ret.first = (*ret.first) < (*min) ? ret.first : min;
-            ret.second = (*ret.second) > (*max) ? ret.second : max;
+            ret.first = (*min) <= (*ret.first) ? min : ret.first;
+            ret.second = (*max) >= (*ret.second) ? max : ret.second;
             return ret;
         }
     }
@@ -246,6 +229,7 @@ namespace Awg{
         const std::size_t chunkLeng = 32 / sizeof (short);
         __m256i dataVec = _mm256_setzero_si256();
         __m256i orVec = _mm256_setzero_si256();
+        const __m256i andMask = _mm256_set1_epi16(0xFFF);
         const  __m256i shiftMask = _mm256_setr_epi16(16,1,16,1,16,1,16,1,16,1,16,1,16,1,16,1);
         const __m256i orMask = _mm256_setr_epi8(0,0,0,0xFF,0,0,0,0xFF,0,0,0,0xFF,0,0,0,0xFF,
                                                 0,0,0,0xFF,0,0,0,0xFF,0,0,0,0xFF,0,0,0,0xFF);
@@ -260,6 +244,7 @@ namespace Awg{
         while (begin + chunkLeng <= end)
         {
             dataVec = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(begin));
+            dataVec = _mm256_and_si256( dataVec,andMask);//所有数据都只取低12bit,高4bit数据置零
             dataVec = _mm256_mullo_epi16(dataVec,shiftMask);//用乘法代替左移运算
             orVec = _mm256_setzero_si256();//将或运算寄存器置零
             orVec = _mm256_blendv_epi8(orVec,dataVec,orMask);//提取指定位上的8bit数据
@@ -320,8 +305,8 @@ namespace Awg{
     {
         while (beg < end)
         {
-            double rad = 2.0 * PI * static_cast<double>(beg - output) / static_cast<double>(totalPoints) + phaseRad;
-            *beg = std::round(Amplitude * std::sin(rad));
+            double rad = 2.0 * Awg::PI * (beg - output) / totalPoints + phaseRad;
+            *beg = std::round(Awg::Amplitude * std::sin(rad));
             ++beg;
         }
     }
@@ -331,33 +316,29 @@ namespace Awg{
         constexpr int chunk = 4;
         typename std::aligned_storage<chunk*sizeof (double),32>::type Storage;
         double *buf = reinterpret_cast<double*>(&Storage);
-        const  __m256d piMul2 = _mm256_set1_pd(2.0*PI);
+        const  __m256d piMul2 = _mm256_set1_pd(2.0*Awg::PI);
         const __m256d phaseRadVec = _mm256_set1_pd(phaseRad);
         const __m256d totalPointsVec = _mm256_set1_pd(totalPoints);
-        const __m256d amplVec = _mm256_set1_pd(Awg::Amplitude);
         __m256d retVec = _mm256_set1_pd(0);
-        __m256d dataVec = _mm256_set1_pd(0);
+        __m256d indexVc = _mm256_set1_pd(0);
         while (beg + chunk <= end)
         {
             //这里不使用load加载数据,因为数组是short类型,参与计算时需要隐式转换为double
-            dataVec = _mm256_set_pd(*(beg+0),*(beg+1),*(beg+2),*(beg+3));
-            retVec = _mm256_mul_pd(dataVec,piMul2);
+            double index = beg - output;
+            indexVc = _mm256_set_pd(index,index+1,index+2,index+3);
+            retVec = _mm256_mul_pd(indexVc,piMul2);
             retVec = _mm256_div_pd(retVec,totalPointsVec);
             retVec = _mm256_add_pd(retVec,phaseRadVec);
-            retVec = sinAvx2(retVec);
-            retVec = _mm256_mul_pd(retVec,amplVec);
-            retVec = _mm256_round_pd(retVec, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
-
-            //保存结果,保存结果不使用store的原因同加载
             _mm256_store_pd(buf,retVec);
-            *(beg+0)= buf[0];
-            *(beg+1) = buf[1];
-            *(beg+2) = buf[2];
-            *(beg+3) = buf[3];
+
+            //保存到buf中的数据索引是反的,所以这里需要逆向遍历
+            for(int i = 0; i < chunk; i++)
+            {
+                *(beg + i) = std::round(Awg::Amplitude * std::sin(buf[chunk -1 - i]));
+            }
 
             beg += chunk;
         }
-
         // 处理剩余的元素(不足4个的情况)
         outputSinScalar(totalPoints,phaseRad,output,beg,end);
     }
@@ -451,20 +432,18 @@ namespace Awg{
                     dataVec = _mm256_mul_pd(fallKvec,indexVec);
                     dataVec = _mm256_add_pd(dataVec,fallBvec);
                 }
-
-                //保存结果
                 _mm256_store_pd(buf,dataVec);
-                *(beg+0)= buf[0];
-                *(beg+1) = buf[1];
-                *(beg+2) = buf[2];
-                *(beg+3) = buf[3];
+
+                for(int i = 0; i < chunk; i++)
+                {
+                    *(beg + i) = buf[chunk -1 - i];
+                }
 
                 beg += chunk;
             }
-
-            //处理剩余元素
-            outputTriangleScalar(raiseK,raiseB,fallK,fallB,output,peak,beg,end);
         }
+        //处理剩余元素
+        outputTriangleScalar(raiseK,raiseB,fallK,fallB,output,peak,beg,end);
     }
 
 }
@@ -932,7 +911,7 @@ AwgShortArray Awg::generateSin(double sampleRate, double frequency, double phase
         std::cerr << "Error: Memory allocation failed" << std::endl;
         return AwgShortArray{};
     }
-    
+
     //每一个线程处理的点数为总点数/线程数再向上取整
     std::size_t index = 0;
     std::vector<std::size_t> chunks = Awg::cutArrayMin(totalPoints,Awg::MinArrayLength);
@@ -949,9 +928,8 @@ AwgShortArray Awg::generateSin(double sampleRate, double frequency, double phase
 #endif
         index += chunks[i];
     }
-    
-    pool->waitforDone();
 
+    pool->waitforDone();
     return waveform;
 }
 
@@ -990,7 +968,6 @@ AwgShortArray Awg::generateSquare(double sampleRate, double frequency, double du
     }
 
     pool->waitforDone();
-
     return waveform;
 }
 

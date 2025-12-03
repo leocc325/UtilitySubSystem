@@ -32,13 +32,14 @@ namespace Awg {
     ///查找字符串中第一次出现字符target的位置(多线程版本)
     std::size_t findCharMT(const char* beg,const char* end, char target) noexcept;
 
-    /// 从给定short数组中查找最小值并返回最小值指针,在极端情况下(数组已经按从大到小排序)这个函数的效率可能会略低于std::min_element
+    /// 从给定short数组中查找最小值并返回第一个最小值指针,在极端情况下(数组已经按从大到小排序)这个函数的效率可能会略低于std::min_element
     const short* min(const short* beg,const short* end);
 
-    /// 从给定short数组中查找最大值并返回最大值指针,在极端情况下(数组已经按从小到大排序)这个函数的效率可能会略低于std::max_element
+    /// 从给定short数组中查找最大值并返回第一个最大值指针,在极端情况下(数组已经按从小到大排序)这个函数的效率可能会略低于std::max_element
     const short* max(const short* beg,const short* end);
 
-    ///从给定的数组中查找最小值和最大值,返回最小值和最大值指针
+    ///从给定的数组中查找最小值和最大值,返回最小值和最大值指针,avx2版本和std版本返回结果不一样
+    /// avx2版本返回的是第一个最小值和第一个最大值指针,std版本返回的是第一个最小值和最后一个最大值指针
     std::pair<const short*,const short*> minmax(const short *beg, const short*end);
 
     ///从给定的数组中查找最小值和最大值,返回最小值和最大值指针(多线程版)

@@ -152,9 +152,9 @@ private:
         m_Stoped.store(false);
         while (!m_Stop.load(std::memory_order_relaxed))
         {
-            if(this->empty())
+            std::unique_lock<std::mutex> lock(m_Mutex);
+            if(m_TaskQue.empty())
             {
-                std::unique_lock<std::mutex> lock(m_Mutex);
                 if(m_DoneFlag.load())
                 {
                     //m_DoneFlag控制线程只在调用了wait(std::promise<bool>&& p)之后设置一次promise
@@ -165,13 +165,14 @@ private:
             }
             else
             {
-                std::unique_lock<std::mutex> lock(m_Mutex);
                 std::function<void()> task = std::move(m_TaskQue.front());
-                m_TaskQue.pop();
+                m_Start = std::chrono::system_clock::now();
                 lock.unlock();
 
-                m_Start = std::chrono::system_clock::now();
                 task();
+
+                std::unique_lock<std::mutex> lock(m_Mutex);
+                m_TaskQue.pop();
                 m_End = std::chrono::system_clock::now();
             }
         }
