@@ -781,16 +781,16 @@ std::vector<std::size_t> Awg::cutTextFile(QFile &file, std::size_t minChunk, con
                 unsigned char* data = file.map(index+chunkSize,preReadLeng);
                 const char* beg = reinterpret_cast<const char*>(data);
                 const char* end = beg + preReadLeng;
-                const char* extart = end;
+                const char* extra = end;
 
                 for(std::size_t i = 0; i < spliters.size(); i++)
                 {
                     const char* pos = Awg::findChar(beg,end,spliters[i]);
                     if(pos != nullptr)
-                        extart = std::min(pos,extart);
+                        extra = std::min(pos,extra);
                 }
 
-                std::size_t extraLeng = extart - beg;
+                std::size_t extraLeng = (extra == end) ? 0 : extra - beg;
                 vec.push_back(chunkSize+extraLeng);
                 index = index + chunkSize + extraLeng;
 
