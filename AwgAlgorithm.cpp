@@ -7,6 +7,7 @@
 #include <iostream>
 #include <algorithm>
 #include <cmath>
+#include <random>
 
 namespace Awg{
     std::size_t countCharScalar(const char* beg, const char* end, char target) noexcept
@@ -46,24 +47,20 @@ namespace Awg{
         return count + countCharScalar(beg,end,target);
     }
 
-    std::size_t findCharScalar(const char *beg, const char *end, char target) noexcept
+    const char* findCharScalar(const char *beg, const char *end, char target) noexcept
     {
-        std::size_t index = 0;
         while (beg < end)
         {
             if(*beg == target)
-                return index;
-
-            ++index;
+                return beg;
             ++beg;
         }
-        return index;
+        return nullptr;
     }
 
-    std::size_t findCharAvx2(const char *beg, const char *end, char target) noexcept
+    const char* findCharAvx2(const char *beg, const char *end, char target) noexcept
     {
         const std::size_t step = 32;
-        std::size_t index = 0;
 
         __m256i mask = _mm256_set1_epi8(target);
         while (beg + step <= end)
@@ -73,16 +70,12 @@ namespace Awg{
             int maskRet = _mm256_movemask_epi8(cmpRet);
 
             if(maskRet == 0)
-            {
                 beg += step;
-                index  += 32;
-            }
             else
-                return __builtin_ctz(maskRet) + index ;
+                return __builtin_ctz(maskRet) + beg ;
         }
 
-        index += findCharScalar(beg,end,target);
-        return index;
+        return findCharScalar(beg,end,target);
     }
 
     const short* minAvx2(const short *begin, const short *end)
@@ -445,7 +438,6 @@ namespace Awg{
         //处理剩余元素
         outputTriangleScalar(raiseK,raiseB,fallK,fallB,output,peak,beg,end);
     }
-
 }
 
 bool Awg::isFloatBegin(char c) noexcept
@@ -471,10 +463,28 @@ std::size_t Awg::countChar( const char *beg, const char *end, char target) noexc
 
 std::size_t Awg::countCharMT(const char *beg, const char *end, char target) noexcept
 {
+    const std::size_t length = end - beg;
+    std::vector<std::size_t> chunks = Awg::cutArrayMin(length,Awg::MinArrayLength);
+    std::vector< std::future<std::size_t> > futures;
+    futures.reserve(chunks.size());
 
+    ThreadPool* pool = Awg::globalThreadPool();
+    for(std::size_t i = 0; i < chunks.size(); i++)
+    {
+        futures.push_back(pool->run(Awg::countChar,beg,beg+chunks[i],target));
+        beg += chunks[i];
+    }
+    pool->waitforDone();
+
+    std::size_t count = 0;
+    for(std::size_t i = 0; i < futures.size(); i++)
+    {
+        count += futures[i].get();
+    }
+    return count;
 }
 
-std::size_t Awg::findChar(const char *beg, const char *end, char target) noexcept
+const char* Awg::findChar(const char *beg, const char *end, char target) noexcept
 {
 #ifdef __AVX2__
     return Awg::findCharAvx2(beg,end,target);
@@ -483,9 +493,34 @@ std::size_t Awg::findChar(const char *beg, const char *end, char target) noexcep
 #endif
 }
 
-std::size_t Awg::findCharMT(const char *beg, const char *end, char target) noexcept
+const char* Awg::findCharMT(const char *beg, const char *end, char target) noexcept
 {
+    const std::size_t length = end - beg;
+    std::vector<std::size_t> chunks = Awg::cutArrayMin(length,Awg::MinArrayLength);
+    std::vector< std::future<const char*> > futures;
+    futures.reserve(chunks.size());
 
+    ThreadPool* pool = Awg::globalThreadPool();
+    for(std::size_t i = 0; i < chunks.size(); i++)
+    {
+        futures.push_back(pool->run(Awg::findChar,beg,beg+chunks[i],target));
+        beg += chunks[i];
+    }
+    pool->waitforDone();
+
+    //返回最小的指针
+    std::vector<const char*> rets;
+    for(std::size_t i = 0; i < futures.size(); i++)
+    {
+        const char* f = futures[i].get();
+        if( f != nullptr)
+            rets.push_back(f);
+    }
+
+    if(rets.empty())
+        return nullptr;
+    else
+        return *std::min_element(rets.begin(),rets.end());
 }
 
 const short *Awg::min(const short *begin, const short *end)
@@ -509,7 +544,7 @@ const short* Awg::max(const short *begin, const short *end)
 std::pair<const short *, const short *> Awg::minmax(const short *begin, const short *end)
 {
 #ifdef __AVX2__
-        return Awg::minmaxAvx2(begin,end);
+    return Awg::minmaxAvx2(begin,end);
 #else
     return std::minmax_element(begin,end);
 #endif
@@ -525,11 +560,7 @@ std::pair<const short *, const short *> Awg::minmaxMT(const short *begin, const 
     ThreadPool* pool = Awg::globalThreadPool();
     for(std::size_t i = 0; i < threadChunks.size(); i++)
     {
-#ifdef __AVX2__
-        futures[i] = pool->run(Awg::minmaxAvx2,begin,begin+threadChunks[i]);
-#else
-        futures[i] = pool->run(std::minmax_element<const short*,const short*>,begin,begin+threadChunks[i]);
-#endif
+        futures[i] = pool->run(Awg::minmax,begin,begin+threadChunks[i]);
         begin += threadChunks[i];
     }
     pool->waitforDone();
@@ -640,11 +671,8 @@ AwgShortArray Awg::generateOverview(const Awg::DT *data, const std::size_t lengt
         while(groupBeg < groupEnd)
         {
             //开始计算每一组数据,找出每一个分组数据中的最大值和最小值,注意最大值最小值出现顺序,不可交换这两个值的顺序
-#ifdef __AVX2__
-            std::pair<const Awg::DT*,const Awg::DT*> result = Awg::minmaxAvx2((*groupBeg).first,(*groupBeg).second);
-#else
-            std::pair<const Awg::DT*,const Awg::DT*> result = std::minmax_element((*groupBeg).first,(*groupBeg).second);
-#endif
+            std::pair<const Awg::DT*,const Awg::DT*> result = Awg::minmax((*groupBeg).first,(*groupBeg).second);
+
             buf[2*index] = (result.first < result.second) ? (*result.first) : (*result.second);
             buf[2*index+1] = (result.first < result.second) ? (*result.second) : (*result.first);
 
@@ -701,11 +729,8 @@ AwgShortArray Awg::generateOverviewMT(const Awg::DT *data, const std::size_t len
             {
                 //开始计算每一组数据,找出每一个分组数据中的最大值和最小值,注意最大值最小值出现顺序,不可交换这两个值的顺序
                 std::pair<const Awg::DT*,const Awg::DT*> pair = iteratorGroups[i];
-#ifdef __AVX2__
-                std::pair<const Awg::DT*,const Awg::DT*> result = Awg::minmaxAvx2(pair.first,pair.second);
-#else
-                std::pair<const Awg::DT*,const Awg::DT*> result = std::minmax_element(pair.first,pair.second);
-#endif
+                std::pair<const Awg::DT*,const Awg::DT*> result = Awg::minmax(pair.first,pair.second);
+
                 buf[2*i] = (result.first < result.second) ? (*result.first) : (*result.second);
                 buf[2*i+1] = (result.first < result.second) ? (*result.second) : (*result.first);
             }
@@ -753,21 +778,19 @@ std::vector<std::size_t> Awg::cutTextFile(QFile &file, std::size_t minChunk, con
             }
             else
             {
-                std::size_t extraLeng = preReadLeng+1;//还需要读取额外extraLeng才能保证文本没有被切割到两个块中
                 unsigned char* data = file.map(index+chunkSize,preReadLeng);
+                const char* beg = reinterpret_cast<const char*>(data);
+                const char* end = beg + preReadLeng;
+                const char* extart = end;
 
-                //分隔符索引中非0的最小值就是需要实际额外读取的长度
                 for(std::size_t i = 0; i < spliters.size(); i++)
                 {
-                    const char* beg = reinterpret_cast<const char*>(data);
-                    const char* end = beg + preReadLeng;
-                    std::size_t pos = Awg::findChar(beg,end,spliters[i]);
-                    extraLeng = (pos != 0) ? std::min(extraLeng,pos) : extraLeng;
+                    const char* pos = Awg::findChar(beg,end,spliters[i]);
+                    if(pos != nullptr)
+                        extart = std::min(pos,extart);
                 }
 
-                //如果最终的额外长度还是等于预读长度+1就说明在第一个字符处匹配成功或者全部字符都没有匹配成功
-                //这种情况下就不预读额外的字节数
-                extraLeng = (extraLeng == preReadLeng + 1) ? 0 : extraLeng;
+                std::size_t extraLeng = extart - beg;
                 vec.push_back(chunkSize+extraLeng);
                 index = index + chunkSize + extraLeng;
 
@@ -1034,5 +1057,23 @@ AwgShortArray Awg::generateTriangle(double sampleRate, double frequency, double 
 
     pool->waitforDone();
     return waveform;
+}
+
+AwgShortArray Awg::generateNoise(double sampleRate, double bandWidth)
+{
+#if 0
+    //mingw的编译器实现似乎有bug,std::random_device生成的种子一直是同一个值,所以这里采用别的方式获取随机种子
+    std::random_device rd;
+    std::size_t seed = rd();
+#else
+    std::size_t time = std::chrono::system_clock::now().time_since_epoch().count();
+    std::size_t seed = time % std::numeric_limits<uint>::max();
+#endif
+    std::mt19937_64 engine(seed);
+    std::uniform_int_distribution<short> dis(0,4096);
+    for(int i = 0; i < 100; i++)
+    {
+        int a = dis(engine);
+    }
 }
 

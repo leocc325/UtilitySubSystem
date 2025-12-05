@@ -26,11 +26,11 @@ namespace Awg {
     ///计算字符串中出现字符target的次数(多线程版本)
     std::size_t countCharMT(const char* beg, const char* end, char target) noexcept;
 
-    ///查找字符串中第一次出现字符target的位置
-    std::size_t findChar(const char* beg,const char* end, char target) noexcept;
+    ///查找字符串中第一次出现字符target的位置,如果未找到匹配的字符则返回空指针,否则返回字符指针
+    const char* findChar(const char* beg,const char* end, char target) noexcept;
 
     ///查找字符串中第一次出现字符target的位置(多线程版本)
-    std::size_t findCharMT(const char* beg,const char* end, char target) noexcept;
+    const char* findCharMT(const char* beg,const char* end, char target) noexcept;
 
     /// 从给定short数组中查找最小值并返回第一个最小值指针,在极端情况下(数组已经按从大到小排序)这个函数的效率可能会略低于std::min_element
     const short* min(const short* beg,const short* end);
