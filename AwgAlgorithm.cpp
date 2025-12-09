@@ -640,7 +640,7 @@ AwgShortArray Awg::generateOverview(const Awg::DT *data, const std::size_t lengt
     {
         //当数据点数超过最大限制时将数据点数压缩到最大限制值的两倍,将数据分为Awg::MaxPlotPoints分别处理
         const std::size_t groupLength = length / Awg::MaxPlotPoints;
-        const std::size_t remainLength = groupLength % Awg::MaxPlotPoints;
+        const std::size_t remainLength = length - groupLength * Awg::MaxPlotPoints;
         AwgShortArray buf(Awg::MaxPlotPoints*2);
 
         //计算要压缩的每一段数据长度
@@ -697,7 +697,7 @@ AwgShortArray Awg::generateOverviewMT(const Awg::DT *data, const std::size_t len
     {
         //当数据点数超过最大限制时将数据点数压缩到最大限制值的两倍,将数据分为Awg::MaxPlotPoints分别处理
         const std::size_t groupLength = length / Awg::MaxPlotPoints;
-        const std::size_t remainLength = groupLength % Awg::MaxPlotPoints;
+        const std::size_t remainLength = length - groupLength * Awg::MaxPlotPoints;
         AwgShortArray buf(Awg::MaxPlotPoints*2);
 
         //计算要压缩的每一段数据长度
