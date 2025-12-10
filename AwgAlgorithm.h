@@ -13,6 +13,8 @@ namespace Awg {
     /// 函数内部都做了向量计算和标量计算两种实现以及线程池并行计算(如果可行的话),所以大部分函数的执行效率都是很高的,未使用软件和硬件加速的算法也会在后期补充
 
     ///2025.12.2更新:函数名不再区分标量和矢量版本,函数内部会自动选择对应的版本,只在签名上区分是否使用了多线程并行计算
+    ///
+    /// 2025.12.10更新:波形生成算法返回double数组,新增double数组转short数组的函数
 
     ///判断字符c是否是浮点数的开头
     bool isFloatBegin(char c) noexcept;
@@ -41,9 +43,11 @@ namespace Awg {
     ///从给定的数组中查找最小值和最大值,返回最小值和最大值指针,avx2版本和std版本返回结果不一样
     /// avx2版本返回的是第一个最小值和第一个最大值指针,std版本返回的是第一个最小值和最后一个最大值指针
     std::pair<const short*,const short*> minmax(const short *beg, const short*end);
+    std::pair<const double*,const double*> minmax(const double *beg, const double*end);
 
     ///从给定的数组中查找最小值和最大值,返回最小值和最大值指针(多线程版)
     std::pair<const short*,const short*> minmaxMT(const short *beg, const short*end);
+    std::pair<const double*,const double*> minmaxMT(const double *beg, const double*end);
 
     ///将short数组中的每一个值取12bit压缩写入到二进制内存中,返回写入的长度,需要保证output长度足够写入全部数据,否则会导致程序崩溃
     void compressShort12Bit(const short* beg,const short* end,char* output);//1024bit,前768bit存放，后256比特不适用
@@ -55,10 +59,10 @@ namespace Awg {
     AwgDoubleArray normalizationMT(const AwgDoubleArray& input,const double inputMin,const double inputMax,const double outputMin,const double outputMax);
 
     ///数据点超过最大像素点之后按包络生成数据的略缩图
-    AwgShortArray generateOverview(const Awg::DT* data,const std::size_t length);
+    AwgDoubleArray generateOverview(const double* data,const std::size_t length);
 
     ///数据点超过最大像素点之后按包络生成数据的略缩图(多线程版本)
-    AwgShortArray generateOverviewMT(const Awg::DT* data,const std::size_t length);
+    AwgDoubleArray generateOverviewMT(const double* data,const std::size_t length);
 
     ///根据线程池线程数将文本文件切割成若干个大小至少为minCunk的小内存块,同时保证里面的数据不被切割到不同的块中,返回每一个块的大小
     std::vector<std::size_t> cutTextFile(QFile& file, std::size_t minChunk, const std::vector<char>& spliters);
@@ -75,17 +79,20 @@ namespace Awg {
     ///根据线程池线程数将一个长度为length块切割成若干个大小至少为minChun而且为aligned整倍数的小数组,返回这些数组的长度
     std::vector<std::size_t> cutArrayAligned(std::size_t length,std::size_t minChunk,std::size_t aligned) noexcept;
 
+    ///数据类型转换
+    AwgShortArray doubleToShort(const AwgDoubleArray& array);
+
     ///生成正弦波波形
-    AwgShortArray generateSin(double sampleRate,double frequency,double phase);
+    AwgDoubleArray generateSin(double sampleRate,double frequency,double phase);
     
     ///生成方波波形
-    AwgShortArray generateSquare(double sampleRate,double frequency,double duty);
+    AwgDoubleArray generateSquare(double sampleRate,double frequency,double duty);
 
     ///生成三角波形
-    AwgShortArray generateTriangle(double sampleRate,double frequency,double symmetry);
+    AwgDoubleArray generateTriangle(double sampleRate,double frequency,double symmetry);
 
     ///生成噪声波形
-    AwgShortArray generateNoise(double sampleRate,double bandWidth);
+    AwgDoubleArray generateNoise(double sampleRate,double bandWidth);
 }
 
 #endif // AWGALGORITHM_H
