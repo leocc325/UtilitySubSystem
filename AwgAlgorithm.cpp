@@ -34,6 +34,15 @@ namespace Awg{
     extern __inline __m256d __attribute__((__gnu_inline__, __always_inline__, __artificial__))
     sinAvx2(__m256d x)
     {
+        static constexpr double denpow1 = double(1) / 1;
+        static constexpr double denpow3 = double(-1) / 6;
+        static constexpr double denpow5 = double(1) / 120;
+        static constexpr double denpow7 = double(-1) / 5040;
+        static constexpr double denpow9 = double(1) / 362800;
+        static constexpr double denpow11 = double(-1) / 39916800;
+        static constexpr double denpow13 = double(1) / double(6227020800);
+        static constexpr double denpow15 = double(-1) / double(1307674368000);
+
         // 将 x 映射到 [-π, π] 区间
         x = mm256_wrap_to_pi(x);
 
@@ -48,13 +57,13 @@ namespace Awg{
 
         // 对于较大角度，使用 7 阶多项式近似
         // 系数来自 minimax 近似，在 [-π, π] 区间上误差 < 1e-7
-        const __m256d c1 = _mm256_set1_pd(1.0);
-        const __m256d c3 = _mm256_set1_pd(-1.66666666666666307295e-1);  // -1/6
-        const __m256d c5 = _mm256_set1_pd(8.33333333332211858878e-3);   // 1/120
-        const __m256d c7 = _mm256_set1_pd(-1.98412698295895385996e-4);  // -1/5040
-        const __m256d c9 = _mm256_set1_pd(2.75573136213857245213e-6);   // 1/362880
-        const __m256d c11 = _mm256_set1_pd(-2.50507477628578072866e-8); // -1/39916800
-        const __m256d c13 = _mm256_set1_pd(1.58962301576546568060e-10);
+        const __m256d c1 = _mm256_set1_pd(denpow1);
+        const __m256d c3 = _mm256_set1_pd(denpow3);
+        const __m256d c5 = _mm256_set1_pd(denpow5);
+        const __m256d c7 = _mm256_set1_pd(denpow7);
+        const __m256d c9 = _mm256_set1_pd(denpow9);
+        const __m256d c11 = _mm256_set1_pd(denpow11);
+        const __m256d c13 = _mm256_set1_pd(denpow13);
 
         // 使用霍纳法则计算多项式：x + x^3*c3 + x^5*c5 + ...
         __m256d x2 = _mm256_mul_pd(x, x);
@@ -461,7 +470,7 @@ namespace Awg{
         while (beg + chunk <= end)
         {
             double index = beg - output;
-            indexVc = _mm256_set_pd(index,index+1,index+2,index+3);
+            indexVc = _mm256_setr_pd(index,index+1,index+2,index+3);
             retVec = _mm256_mul_pd(indexVc,piMul2);
             retVec = _mm256_div_pd(retVec,totalPointsVec);
             retVec = _mm256_add_pd(retVec,phaseRadVec);
