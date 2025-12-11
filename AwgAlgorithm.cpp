@@ -9,17 +9,100 @@
 #include <cmath>
 #include <random>
 
-namespace Awg{
+//Avx版本的sin计算函数,非原创,缺点是我看不懂
+namespace AvxSin {
+    static const double FABE13_TINY_THRESHOLD = 7.450580596923828125e-9;
 
-    extern __inline __m256d __attribute__((__gnu_inline__, __always_inline__, __artificial__))
+    static const double FABE13_TWO_OVER_PI_HI = 0x1.45f306dc9c883p-1;
+    static const double FABE13_TWO_OVER_PI_LO = -0x1.9f3c6a7a0b5edp-57;
+    static const double FABE13_PI_OVER_2_HI = 0x1.921fb54442d18p+0;
+    static const double FABE13_PI_OVER_2_LO = 0x1.1a62633145c07p-53;
+    static const double FABE13_SIN_COEFFS_MAIN[] = {
+        9.99999999999999999983e-01, -1.66666666666666657415e-01,
+        8.33333333333329961475e-03, -1.98412698412589187999e-04,
+        2.75573192235635111290e-06, -2.50521083760783692702e-08,
+        1.60590438125280493886e-10, -7.64757314471113976640e-13 };
+    static const double FABE13_COS_COEFFS_MAIN[] = {
+        1.00000000000000000000e+00, -4.99999999999999944489e-01,
+        4.16666666666664590036e-02, -1.38888888888829782464e-03,
+        2.48015873015087640936e-05, -2.75573192094882420430e-07,
+        2.08767569813591324530e-09, -1.14757362211242971740e-11 };
+
+    __inline __m256d __attribute__((__gnu_inline__, __always_inline__, __artificial__))
+    polyAvx2(__m256d r_squared, const double* coeffs) {
+        const __m256d C0 = _mm256_set1_pd(coeffs[0]), C1 = _mm256_set1_pd(coeffs[1]), C2 = _mm256_set1_pd(coeffs[2]), C3 = _mm256_set1_pd(coeffs[3]), C4 = _mm256_set1_pd(coeffs[4]), C5 = _mm256_set1_pd(coeffs[5]), C6 = _mm256_set1_pd(coeffs[6]), C7 = _mm256_set1_pd(coeffs[7]);
+        __m256d z = r_squared; __m256d z2 = _mm256_mul_pd(z, z); __m256d z4 = _mm256_mul_pd(z2, z2);
+        __m256d T01 = _mm256_fmadd_pd(C1, z, C0); __m256d T23 = _mm256_fmadd_pd(C3, z, C2); __m256d T45 = _mm256_fmadd_pd(C5, z, C4); __m256d T67 = _mm256_fmadd_pd(C7, z, C6);
+        __m256d S03 = _mm256_fmadd_pd(T23, z2, T01); __m256d S47 = _mm256_fmadd_pd(T67, z2, T45);
+        return _mm256_fmadd_pd(S47, z4, S03);
+    }
+
+    //这个函数来自于https://github.com/farukalpay/FABE,这个函数的精度几乎和std::sin精度一样,但是耗时会比sinAvx2长接近一倍
+    __inline __m256d __attribute__((__gnu_inline__, __always_inline__, __artificial__))
+    sinAvx2HighPrecision(__m256d vx)
+    {
+        static const __m256d VEC_TWO_OVER_PI_HI = _mm256_set1_pd(FABE13_TWO_OVER_PI_HI);
+        static const __m256d VEC_TWO_OVER_PI_LO = _mm256_set1_pd(FABE13_TWO_OVER_PI_LO);
+        static const __m256d VEC_PI_OVER_2_HI = _mm256_set1_pd(FABE13_PI_OVER_2_HI);
+        static const __m256d VEC_PI_OVER_2_LO = _mm256_set1_pd(FABE13_PI_OVER_2_LO);
+        static const __m256d VEC_NAN = _mm256_set1_pd(NAN);
+        static const __m256d VEC_TINY = _mm256_set1_pd(FABE13_TINY_THRESHOLD);
+        static const __m256d VEC_SIGN_MASK = _mm256_set1_pd(-0.0); const __m256d VEC_INF = _mm256_set1_pd(INFINITY);
+        static const __m256d VEC_ROUND_BIAS = _mm256_set1_pd(6755399441055744.0);
+        static const __m256i VEC_ROUND_BIAS_I = _mm256_castpd_si256(VEC_ROUND_BIAS);
+        static const __m256i VEC_INT_3 = _mm256_set1_epi64x(3), VEC_INT_0 = _mm256_setzero_si256(), VEC_INT_1 = _mm256_set1_epi64x(1), VEC_INT_2 = _mm256_set1_epi64x(2);
+
+        //_mm_prefetch((const char*)(&in[i + 64]), _MM_HINT_T0);
+
+        __m256d vax = _mm256_andnot_pd(VEC_SIGN_MASK, vx);
+        __m256d nan_mask = _mm256_cmp_pd(vx, vx, _CMP_UNORD_Q);
+        __m256d inf_mask = _mm256_cmp_pd(vax, VEC_INF, _CMP_EQ_OQ);
+        __m256d special_mask = _mm256_or_pd(nan_mask, inf_mask);
+        __m256d tiny_mask = _mm256_cmp_pd(vax, VEC_TINY, _CMP_LE_OS);
+        __m256d p_hi = _mm256_mul_pd(vx, VEC_TWO_OVER_PI_HI);
+        __m256d e1 = _mm256_fmsub_pd(vx, VEC_TWO_OVER_PI_HI, p_hi);
+        __m256d p_lo = _mm256_fmadd_pd(vx, VEC_TWO_OVER_PI_LO, e1);
+        __m256d k_dd = _mm256_round_pd(_mm256_add_pd(p_hi, p_lo), _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
+        __m256d t1 = _mm256_mul_pd(k_dd, VEC_PI_OVER_2_HI);
+        __m256d e2 = _mm256_fmsub_pd(k_dd, VEC_PI_OVER_2_HI, t1);
+        __m256d t2 = _mm256_mul_pd(k_dd, VEC_PI_OVER_2_LO);
+        __m256d w = _mm256_add_pd(e2, t2);
+        __m256d r = _mm256_sub_pd(_mm256_sub_pd(vx, t1), w);
+        __m256d r2 = _mm256_mul_pd(r, r);
+
+        // *** TODO: Replace with AVX2 Ψ-Hyperbasis calculation ***
+        __m256d sin_poly_r2 = polyAvx2(r2, FABE13_SIN_COEFFS_MAIN);
+        __m256d cos_poly_r2 = polyAvx2(r2, FABE13_COS_COEFFS_MAIN);
+        __m256d sin_r = _mm256_mul_pd(r, sin_poly_r2);
+        __m256d cos_r = cos_poly_r2;
+        // *** END TODO ***
+
+        __m256d k_plus_bias = _mm256_add_pd(k_dd, VEC_ROUND_BIAS);
+        __m256i vk_int = _mm256_sub_epi64(_mm256_castpd_si256(k_plus_bias), VEC_ROUND_BIAS_I);
+        __m256i vq = _mm256_and_si256(vk_int, VEC_INT_3);
+        __m256d q0_mask = _mm256_castsi256_pd(_mm256_cmpeq_epi64(vq, VEC_INT_0));
+        __m256d q1_mask = _mm256_castsi256_pd(_mm256_cmpeq_epi64(vq, VEC_INT_1));
+        __m256d q2_mask = _mm256_castsi256_pd(_mm256_cmpeq_epi64(vq, VEC_INT_2));
+        __m256d neg_sin_r = _mm256_xor_pd(sin_r, VEC_SIGN_MASK);
+        __m256d neg_cos_r = _mm256_xor_pd(cos_r, VEC_SIGN_MASK);
+        __m256d s_result = neg_cos_r;
+        s_result = _mm256_blendv_pd(s_result, neg_sin_r, q2_mask);
+        s_result = _mm256_blendv_pd(s_result, cos_r, q1_mask);
+        s_result = _mm256_blendv_pd(s_result, sin_r, q0_mask);
+        s_result = _mm256_blendv_pd(s_result, vx, tiny_mask);
+        s_result = _mm256_blendv_pd(s_result, VEC_NAN, special_mask);
+        return s_result;
+    }
+
+    __inline __m256d __attribute__((__gnu_inline__, __always_inline__, __artificial__))
     mm256_abs_pd(__m256d x) {
         const __m256d sign_mask = _mm256_set1_pd(-0.0); // -0.0 = 0x8000000000000000
         return _mm256_andnot_pd(sign_mask, x);
     }
 
     // 辅助函数：将 x 包装到 [-π, π] 区间
-    extern __inline __m256d __attribute__((__gnu_inline__, __always_inline__, __artificial__))
-    mm256_wrap_to_pi(__m256d x) {
+    __inline __m256d __attribute__((__gnu_inline__, __always_inline__, __artificial__))
+    mm256_reduce_to_pi(__m256d x) {
         const __m256d inv_two_pi = _mm256_set1_pd(0.5 * M_1_PI);
         const __m256d two_pi = _mm256_set1_pd(2.0 * M_PI);
 
@@ -30,8 +113,8 @@ namespace Awg{
         return _mm256_fnmadd_pd(n, two_pi, x);
     }
 
-
-    extern __inline __m256d __attribute__((__gnu_inline__, __always_inline__, __artificial__))
+    //这个函数来自于deepseek,这个函数效率尚可,但是精度欠佳某些角度范围内只有小数点后四位的精度准确
+    __inline __m256d __attribute__((__gnu_inline__, __always_inline__, __artificial__))
     sinAvx2(__m256d x)
     {
         static constexpr double denpow1 = double(1) / 1;
@@ -43,8 +126,7 @@ namespace Awg{
         static constexpr double denpow13 = double(1) / double(6227020800);
         static constexpr double denpow15 = double(-1) / double(1307674368000);
 
-        // 将 x 映射到 [-π, π] 区间
-        x = mm256_wrap_to_pi(x);
+        x = mm256_reduce_to_pi(x);
 
         // 对于小角度，使用泰勒展开更精确
         const __m256d small_threshold = _mm256_set1_pd(1e-4);
@@ -53,7 +135,7 @@ namespace Awg{
         // 小角度近似：sin(x) ≈ x - x^3/6
         __m256d x_sq = _mm256_mul_pd(x, x);
         __m256d small_result = _mm256_mul_pd(x,
-                _mm256_fnmadd_pd(_mm256_set1_pd(1.0/6.0), x_sq, _mm256_set1_pd(1.0)));
+                                             _mm256_fnmadd_pd(_mm256_set1_pd(1.0/6.0), x_sq, _mm256_set1_pd(1.0)));
 
         // 对于较大角度，使用 7 阶多项式近似
         // 系数来自 minimax 近似，在 [-π, π] 区间上误差 < 1e-7
@@ -78,7 +160,9 @@ namespace Awg{
         // 合并结果：小角度使用泰勒展开，大角度使用多项式
         return _mm256_blendv_pd(result, small_result, mask_small);
     }
+}
 
+namespace Awg{
     std::size_t countCharScalar(const char* beg, const char* end, char target) noexcept
     {
         std::size_t count = 0;
@@ -474,7 +558,7 @@ namespace Awg{
             retVec = _mm256_mul_pd(indexVc,piMul2);
             retVec = _mm256_div_pd(retVec,totalPointsVec);
             retVec = _mm256_add_pd(retVec,phaseRadVec);
-            retVec = sinAvx2(retVec);
+            retVec = AvxSin::sinAvx2HighPrecision(retVec);
             retVec = _mm256_mul_pd(retVec,amplVec);
             _mm256_storeu_pd(beg,retVec);
 
