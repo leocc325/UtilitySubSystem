@@ -172,6 +172,6 @@ using AwgCharArray = AlignedSharedArray<char,Awg::ArrayAlignment>;
 using AwgShortArray = AlignedSharedArray<short,Awg::ArrayAlignment>;
 using AwgIntArray = AlignedSharedArray<int,Awg::ArrayAlignment>;
 using AwgDoubleArray = AlignedSharedArray<double,Awg::ArrayAlignment>;
-using AwgFloatArray = AlignedSharedArray<double,Awg::ArrayAlignment>;
+using AwgFloatArray = AlignedSharedArray<float,Awg::ArrayAlignment>;
 
 #endif // AWGARRAY_H

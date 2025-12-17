@@ -14,12 +14,29 @@ public:
     static AwgSignals* getInstance();
 
 signals:
-    void sigProcessMax(std::size_t size);
+    void sigWarningMessage(QString msg);
 
-    void sigProcess(std::size_t size);
+    void sigSaveWavePixmap(int chanIndex,const QString& fileName);
+
+    void sigSaveFile(int chanIndex,const QString& fileName);
+
+    void sigLoadFile(int chanIndex,const QString& fileName);
+
+    void sigProcessMax(unsigned long long size);
+
+    void sigProcess(unsigned long long size);
+
+    void sigFileProcessMax(unsigned long long size);
+
+    void sigFileProcess(unsigned long long size);
+
+    void sigFpgaWaveSendStart();
+
+    void sigFpgaWaveSendStop();
 
 private:
     AwgSignals();
+
 private:
     static AwgSignals* instance;
 };

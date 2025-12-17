@@ -6,6 +6,10 @@
 #include "UtilitySubSystem/fmt/format.h"
 #endif
 
+#ifndef AWGSIGNALS_H
+#include "UtilitySubSystem/AwgSignals.h"
+#endif
+
 namespace Awg {
     /// 换行符
     const std::string NewLine = "\r\n";
@@ -65,7 +69,7 @@ namespace Awg {
     struct ArithmeticLengthSum
     {
         constexpr static int value = 0;
-        };
+    };
 
     template<typename F, typename... T>
     struct ArithmeticLengthSum<F, T...>
@@ -125,16 +129,16 @@ namespace Awg {
         constexpr int lineLength = ArithmeticLengthSum<T...>::value + sizeof... (Arrays) + NewLine.size();
         const std::string format = csvRowFormat(Arrays...);
 
-        std::string s;
-        s.reserve(lineLength * length);
-        auto inserter = std::back_inserter(s);
+    std::string s;
+    s.reserve(lineLength * length);
+    auto inserter = std::back_inserter(s);
 
-        for(std::size_t i = 0; i < length; i++)
-        {
-            fmt::format_to(inserter, format,*Arrays...);
-            next(Arrays...);
-        }
-        return s;
+    for(std::size_t i = 0; i < length; i++)
+    {
+        fmt::format_to(inserter, format,*Arrays...);
+        next(Arrays...);
+    }
+    return s;
     }*/
 
     ///将数组以csv格式写到output指针中,返回值为输出的起始到结束范围
@@ -149,6 +153,7 @@ namespace Awg {
             output = fmt::format_to(output, format,*Arrays...);
             next(Arrays...);
         }
+        emit AWGSIG->sigFileProcess(length);
         range.second = output;
         return range;
     }
@@ -186,6 +191,7 @@ namespace Awg {
             output = fmt::format_to(output, format,*Arrays...);
             next(Arrays...);
         }
+        emit AWGSIG->sigFileProcess(length);
         range.second = output;
         return range;
     }

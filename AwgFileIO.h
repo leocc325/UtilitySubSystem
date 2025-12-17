@@ -1,12 +1,19 @@
 ﻿#ifndef AWGFILEIO_H
 #define AWGFILEIO_H
 
+#ifndef QLIST_H
+#include <QList>
+#endif
+
+#ifndef QSTRING_H
+#include <QString>
+#endif
+
 #ifndef AwgShortArray_H
 #include "AwgArray.hpp"
 #endif
 
 class QFile;
-class QString;
 namespace Awg
 {
 /**
@@ -25,6 +32,29 @@ namespace Awg
      *
      * 文件加载不需要根据大小区分不同的接口,接口内部会自动根据文件大小划分任务
     */
+
+    enum FileFormat
+    {
+        FmtTxt,
+        FmtCsv,
+        FmtBin,
+        FmtNum
+    };
+
+    static const QList<QString> FileSuffixStringList
+    {
+        QString("txt"),QString("csv"),QString("bin")
+    };
+
+    static const QList<QString> FormatStringList
+    {
+        QString(".txt"),QString(".csv"),QString(".bin")
+    };
+
+    static const QList<QString> FilterStringList
+    {
+        QString("*.txt"),QString("*.csv"),QString("*.bin")
+    };
 
     void storeBinFile(const QString& path,const Awg::DT* array,const std::size_t length);
 
