@@ -14,7 +14,7 @@
 #endif
 
 #ifndef ALIGNEDALLOCATOR_H
-#include "AlignedAllocator.h"
+#include "UtilitySubSystem/AlignedAllocator.h"
 #endif
 
 ///前置声明
@@ -23,7 +23,7 @@ class AlignedSharedArray;
 
 ///AlignedSharedArray模板工具
 namespace Awg {
-    namespace  ASA //ASA = AlignedSharedArray
+    namespace  Asa //ASA = AlignedSharedArray
     {
         ///判断类型T是否是数值类型
         template<typename T>
@@ -39,16 +39,16 @@ namespace Awg {
         constexpr bool  Illegal =IsAlignment<Align>::value && IsArithmetic<T>::value;
 
         template <typename T>
-        struct IsASA:public std::false_type{};
+        struct IsAsa:public std::false_type{};
 
         template<typename T,std::size_t Align>
-        struct IsASA<AlignedSharedArray<T, Align>>:std::true_type{};
+        struct IsAsa<AlignedSharedArray<T, Align>>:std::true_type{};
 
         template<typename T,typename U>
-        struct SameASA:public std::false_type{};
+        struct SameAsa:public std::false_type{};
 
         template<typename T1, std::size_t Align1, typename T2, std::size_t Align2>
-        struct SameASA<AlignedSharedArray<T1, Align1>, AlignedSharedArray<T2, Align2>>
+        struct SameAsa<AlignedSharedArray<T1, Align1>, AlignedSharedArray<T2, Align2>>
         { constexpr static bool value = std::is_same<T1,T2>::value && (Align1 == Align2); };
 
     }
@@ -57,7 +57,7 @@ namespace Awg {
 template<typename T,std::size_t Align>
 class AlignedSharedArray
 {
-    static_assert (Awg::ASA::Illegal<T,Align>,"Align size or Data type is Illagle" );
+    static_assert (Awg::Asa::Illegal<T,Align>,"Align size or Data type is Illagle" );
 
 public:
     AlignedSharedArray(){}
@@ -121,9 +121,17 @@ public:
         return length;
     }
 
+    AlignedSharedArray clone()
+    {
+        AlignedSharedArray ret(length);
+        if(this->array != nullptr && ret.array != nullptr)
+            memcpy(ret.array.get(),this->array.get(),sizeof(T)*length);
+        return ret;
+    }
+
     //确保U和当前数组类型一致,如果类型一致则将vector中的数组依次拼接到一起
     template<typename U>
-    static typename std::enable_if<Awg::ASA::SameASA<AlignedSharedArray<T,Align>,U>::value,U>::type
+    static typename std::enable_if<Awg::Asa::SameAsa<AlignedSharedArray<T,Align>,U>::value,U>::type
     combine(const std::vector<U>& vec)
     {
         //内存足够的情况下直接拼接
@@ -149,8 +157,11 @@ public:
 private:
     void copyImpl(const AlignedSharedArray& other)
     {
-        this->length = other.length;
-        this->array = other.array;
+        if(this != &other)
+        {
+            this->length = other.length;
+            this->array = other.array;
+        }
     }
 
     void moveImpl(AlignedSharedArray&& other)
@@ -173,5 +184,6 @@ using AwgShortArray = AlignedSharedArray<short,Awg::ArrayAlignment>;
 using AwgIntArray = AlignedSharedArray<int,Awg::ArrayAlignment>;
 using AwgDoubleArray = AlignedSharedArray<double,Awg::ArrayAlignment>;
 using AwgFloatArray = AlignedSharedArray<float,Awg::ArrayAlignment>;
+
 
 #endif // AWGARRAY_H
