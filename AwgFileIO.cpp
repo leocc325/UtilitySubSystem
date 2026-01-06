@@ -30,7 +30,7 @@ void storeTextFile(const QString &path, const Awg::DT *array, const std::size_t 
             //根据每一轮计算能处理的最大数据长度计算每一个线程需要处理的数据长度,但是不让每个线程能处理的数据长度小于最小长度限制
             const std::size_t taskLen = std::max( std::size_t(Awg::MinArrayLength) , std::size_t(maxStepLenth/Awg::PoolSize)) ;
             //根据计算得到的每一个线程的数据长度划分线程任务
-            std::vector<std::size_t> pointsVec = Awg::cutArrayMax(length,taskLen);
+            std::vector<std::size_t> pointsVec = Awg::splitLengthMax(length,taskLen);
             //计算线程池每一轮能执行的任务数量
             const std::size_t taskNumOnce = std::min(unsigned(Awg::PoolSize),unsigned(pointsVec.size()));
             //根据每一轮能执行的任务数量创建相应的缓冲区保存转换结果
@@ -53,8 +53,8 @@ void storeTextFile(const QString &path, const Awg::DT *array, const std::size_t 
                     std::future<std::pair<char*,char*>> future;
                     switch (FT)
                     {
-                    case Awg::FmtCsv: future =  pool->run(&Awg::toBinaryCsv<short>,buffers.at(i).get(),pointsVec.at(i),array+dataIndex);break;
-                    case Awg::FmtTxt: future = pool->run(&Awg::toBinaryTxt<short>,buffers.at(i).get(),pointsVec.at(i),array+dataIndex);break;
+                        case Awg::FmtCsv: future =  pool->run(&Awg::toBinaryCsv<short>,buffers.at(i).get(),pointsVec.at(i),array+dataIndex);break;
+                        case Awg::FmtTxt: future = pool->run(&Awg::toBinaryTxt<short>,buffers.at(i).get(),pointsVec.at(i),array+dataIndex);break;
                     }
                     futures.push_back(std::move(future));
                     dataIndex += pointsVec.at(i);
@@ -374,10 +374,10 @@ AwgShortArray Awg::processTextFile(QFile *file, std::size_t mapStart, std::size_
             ++index;
         }
         //出现错误时不打印信息,跳过即可,当错误信息较多时会严重影响读取效率
-        //        else if(ret.ec == std::errc::invalid_argument)
-        //        {
-        //            std::cerr << "Error: invalid argument"<<std::endl<<std::flush;
-        //        }
+//        else if(ret.ec == std::errc::invalid_argument)
+//        {
+//            std::cerr << "Error: invalid argument"<<std::endl<<std::flush;
+//        }
         else if(ret.ec == std::errc::result_out_of_range)
         {
             // 根据值的大小决定使用最大值还是最小值
@@ -387,10 +387,10 @@ AwgShortArray Awg::processTextFile(QFile *file, std::size_t mapStart, std::size_
                 array[index] = std::numeric_limits<Awg::DT>::max();
             ++index;
         }
-        //        else
-        //        {
-        //            std::cout<<"fast_float error:"<<int(ret.ec)<<std::endl<<std::flush;
-        //        }
+//        else
+//        {
+//            std::cout<<"fast_float error:"<<int(ret.ec)<<std::endl<<std::flush;
+//        }
 
         start = (ret.ptr == start) ? start+1 : ret.ptr;//更新指针位置
     }
