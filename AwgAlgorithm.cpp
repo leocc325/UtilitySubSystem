@@ -560,6 +560,8 @@ namespace Awg{
             retVec = _mm256_div_pd(retVec,totalPointsVec);
             retVec = _mm256_add_pd(retVec,phaseRadVec);
             retVec = AvxSin::sinAvx2HighPrecision(retVec);
+            //-o0优化下xsimd::sin的效率显著低于AvxSin::sinAvx2HighPrecision,但是在-o2优化下又于AvxSin::sinAvx2HighPrecision
+            //retVec = xsimd::sin(xsimd::batch<double,xsimd::avx>(retVec));//这里直接指定axv2反而会导致段错误,很奇怪。
             retVec = _mm256_mul_pd(retVec,amplVec);
             _mm256_storeu_pd(beg,retVec);
 

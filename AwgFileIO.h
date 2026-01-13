@@ -9,7 +9,7 @@
 #include <QString>
 #endif
 
-#ifndef AwgShortArray_H
+#ifndef AWGARRAY_H
 #include "AwgArray.hpp"
 #endif
 
@@ -56,21 +56,21 @@ namespace Awg
         QString("*.txt"),QString("*.csv"),QString("*.bin")
     };
 
-    void storeBinFile(const QString& path,const Awg::DT* array,const std::size_t length);
+    void storeBinFile(const QString& path,const double* array,const std::size_t length);
 
-    void storeCsvFile(const QString& path,const Awg::DT* array,const std::size_t length);
+    void storeCsvFile(const QString& path,const double* array,const std::size_t length);
 
-    void storeTxtFile(const QString& path,const Awg::DT* array,const std::size_t length);
+    void storeTxtFile(const QString& path,const double* array,const std::size_t length);
 
-    AwgShortArray loadBinFile(const QString& path);
+    AwgDoubleArray loadBinFile(const QString& path);
 
-    AwgShortArray loadCsvFile(const QString& path);
+    AwgDoubleArray loadCsvFile(const QString& path);
 
-    AwgShortArray loadTxtFile(const QString& path);
+    AwgDoubleArray loadTxtFile(const QString& path);
 
-    AwgShortArray processBinFile(QFile *file, std::size_t mapStart, std::size_t mapSize);
+    AwgDoubleArray processBinFile(QFile *file, std::size_t mapStart, std::size_t mapSize);
 
-    AwgShortArray processTextFile(QFile *file, std::size_t mapStart, std::size_t mapSize,const std::vector<char>& spliters);
+    AwgDoubleArray processTextFile(QFile *file, std::size_t mapStart, std::size_t mapSize,const std::vector<char>& spliters);
 }
 
 #endif // AWGFILEIO_H

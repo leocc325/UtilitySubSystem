@@ -30,30 +30,53 @@ struct FunctionTraits<RT(Args...)>
     };
 };
 
+//noexcept普通函数
+#if __cplusplus >= 201703L
+template<typename RT,typename...Args>
+struct FunctionTraits<RT(Args...) noexcept>:FunctionTraits<RT(Args...)>{};
+#endif
 
 //函数指针
 template<typename RT,typename...Args>
 struct FunctionTraits<RT(*)(Args...)>:FunctionTraits<RT(Args...)>{};
 
+//noexcept函数指针
+#if __cplusplus >= 201703L
+template<typename RT,typename...Args>
+struct FunctionTraits<RT(*)(Args...) noexcept>:FunctionTraits<RT(Args...)>{};
+#endif
+
 //std::function
 template<typename RT,typename...Args>
 struct FunctionTraits<std::function<RT(Args...)>>:FunctionTraits<RT(Args...)>{};
 
-//普通成员函数
+//普通成员函数指针
 template<typename RT,typename ClassType,typename...Args>
 struct FunctionTraits<RT(ClassType::*)(Args...)> :FunctionTraits<RT(Args...)>{};
 
-//const成员函数
 template<typename RT,typename ClassType,typename...Args>
 struct FunctionTraits<RT(ClassType::*)(Args...) const> :FunctionTraits<RT(Args...)>{};
 
-//volatile成员函数
 template<typename RT,typename ClassType,typename...Args>
 struct FunctionTraits<RT(ClassType::*)(Args...) volatile> :FunctionTraits<RT(Args...)>{};
 
-//const volatile成员函数
 template<typename RT,typename ClassType,typename...Args>
 struct FunctionTraits<RT(ClassType::*)(Args...) const volatile> :FunctionTraits<RT(Args...)>{};
+
+
+#if __cplusplus >= 201703L
+template<typename RT,typename ClassType,typename...Args>
+struct FunctionTraits<RT(ClassType::*)(Args...) noexcept> :FunctionTraits<RT(Args...)>{};
+
+template<typename RT,typename ClassType,typename...Args>
+struct FunctionTraits<RT(ClassType::*)(Args...) const noexcept> :FunctionTraits<RT(Args...)>{};
+
+template<typename RT,typename ClassType,typename...Args>
+struct FunctionTraits<RT(ClassType::*)(Args...) volatile noexcept> :FunctionTraits<RT(Args...)>{};
+
+template<typename RT,typename ClassType,typename...Args>
+struct FunctionTraits<RT(ClassType::*)(Args...) const volatile noexcept> :FunctionTraits<RT(Args...)>{};
+#endif
 
 //函数对象
 template<typename Callable>
