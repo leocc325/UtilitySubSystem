@@ -942,7 +942,7 @@ std::pair<const short *, const short *> Awg::minmaxMT(const short *begin, const 
 std::pair<const double *, const double *> Awg::minmaxMT(const double *begin, const double *end)
 {
     std::size_t dataLen = end - begin + 1;
-    std::vector<std::size_t> threadChunks = Awg::splitLengthAligned(dataLen,Awg::MinArrayLength,Awg::ArrayAlignment/sizeof (short));
+    std::vector<std::size_t> threadChunks = Awg::splitLengthAligned(dataLen,Awg::MinArrayLength,Awg::ArrayAlignment/sizeof (double));
     std::vector< std::future<std::pair<const double *, const double *>> > futures;
     futures.reserve(threadChunks.size());
 

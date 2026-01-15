@@ -39,7 +39,7 @@ namespace Awg
         FmtCsv,
         FmtBin,
         FmtNum
-    };
+    };//2026.1.15txt和csv的枚举值要和AwgFileIOprivate.hpp中的枚举值保持一致
 
     static const QList<QString> FileSuffixStringList
     {

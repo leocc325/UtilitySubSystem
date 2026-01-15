@@ -4,7 +4,7 @@
 namespace Awg
 {
     ///线程池大小,建议将这个值设置为核心数-2,预留两个核心给操作系统
-    constexpr unsigned PoolSize = 16;
+    constexpr unsigned PoolSize = 12;
 
     ///数组字节对齐数
     constexpr int ArrayAlignment = 32;
