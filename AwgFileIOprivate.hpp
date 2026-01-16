@@ -88,8 +88,7 @@ namespace Awg {
     ///由于可以直接写入到文件映射的内存中,不需要再预估所需的内存大小,省去临时内存申请、临时内存拷贝到文件内存、最终文件大小resize这三个耗时的操作
     ///不用担心内存不足(数据量较大的情况)导致文件写入失败的情况,因为数据本身、保存字符串的临时内存,文件映射内存这三部分内存开销很高,现在在文件创建时就可以判断内存是否足够写入全部数据,没有中间的内存开销
     ///2026.1.15
-    ///fmt暂时还不支持以固定最大宽度输出字符串,无法事先根据数据长度计算文件大小,所以这里更换方案:
-    ///浮点值默认长度保持10字节(如果用fmt默认输出长度1G数据输出的文本文件大小可能达到20G),然后跟据默认长度划分线程任务,先计(calculateTextLenght)算每一组数据转换后的字符串总长度
+    ///浮点值默认长度保持10字节(如果用fmt默认输出长度1G数据输出的文本文件大小可能达到20G),由此可以精确计算最终的文件大小,随后就可以根据文件大小和数据长度划分线程任务
     ///同时可以得到每一组数据写入文件的起始位置,然后再多线程写入文件即可,同样避免了上述的三个耗时操作(计算文件总长度开销小于上述三个操作)以及内存不足的风险
     template<> struct ArithmeticLength<float>{constexpr static int value = 10;};
 
@@ -224,7 +223,7 @@ namespace Awg {
         char* pos = output;
         for(std::size_t i = 0; i < arrayLenth; ++i,++process)
         {
-            toText_FWImpl(tf,output,Arrays...);//递归写入第i行数据
+            pos = toText_FWImpl(tf,output,Arrays...);//递归写入第i行数据
             next(Arrays...);//准备下一行
             if(process > 1e6)
             {
@@ -237,22 +236,23 @@ namespace Awg {
     }
 
     template<typename F,typename...T>
-    typename std::enable_if<IsArithmetic<T...>::value>::type
+    typename std::enable_if<IsArithmetic<T...>::value,char*>::type
     toText_FWImpl(TextFormat tf,char* output,const F* First,const T*...Arrays)
     {
         const std::string& nf = numericFormat<F>();
         output = fmt::format_to_n(output,ArithmeticLength<F>::value, nf,*First).out;//将浮点值以固定宽度写入内存
         output = fmt::format_to(output,"{}",numericSpliter(tf));//数值输出完成之后添加一个分隔符(如果后面还有数组N列数组)
-        toText_FWImpl(tf,output,Arrays...);//递归输出下一个数组的元素
+        return toText_FWImpl(tf,output,Arrays...);//递归输出下一个数组的元素
     }
 
     template<typename F>
-    typename std::enable_if<IsArithmetic<F>::value>::type
+    typename std::enable_if<IsArithmetic<F>::value,char*>::type
     toText_FWImpl(TextFormat tf,char* output,const F* First)
     {
         const std::string& nf = numericFormat<F>();
         output = fmt::format_to_n(output,ArithmeticLength<F>::value, nf,*First).out;//将浮点值以固定宽度写入内存
         output = fmt::format_to(output,"{}",Awg::NewLine);//如果是最后一个数组在写入完毕之后添加换行符
+        return output;
     }
 
 }

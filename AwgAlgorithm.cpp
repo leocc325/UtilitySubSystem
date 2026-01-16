@@ -646,7 +646,7 @@ namespace Awg{
             else
             {
                 std::size_t index = beg - output;
-                indexVec = _mm256_set_pd(index,index+1,index+2,index+3);
+                indexVec = _mm256_setr_pd(index,index+1,index+2,index+3);//索引反向加载
                 if(thunkEnd <= peak)
                 {
                     dataVec = _mm256_mul_pd(raiseKvec,indexVec);
