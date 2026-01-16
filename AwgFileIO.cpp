@@ -9,101 +9,68 @@
 #include "UtilitySubSystem/fastfloat/fast_float.h"
 
 std::mutex FileMutex;
-#include <QDebug>
-#include <QElapsedTimer>
+
 template<Awg::FileFormat FT>
 void storeTextFile(const QString &path, const double *array, const std::size_t arrayLength)
 {
-    //判断当前内存大小需要几次才能完成文件保存和每一次能处理的点数
-    const double freeMem = Awg::getFreeMemoryWindows() * 0.9;
-    //文件保存过程中需要映射文件占用内存,所以依然需要按数值的预定长度估算每一轮能处理的最大数据长度
-    constexpr int RowLength = Awg::ArithmeticLengthSum<double>::value;
-    //线程池每一轮计算能处理的最大数据长度,这里向上或者向下取整都可以,内存有余量
-    std::size_t maxCountPerLoop = freeMem / RowLength;
-    //根据实际数据长度和每一轮能处理的数据最大长度判断实际上能处理的数据长度
-    maxCountPerLoop = std::min(maxCountPerLoop,arrayLength);
-    //根据每一轮实际能处理的数据长度计算每个线程需要处理的数据长度
-    std::size_t maxCountPerTask = std::max( std::size_t(Awg::MinArrayLength) , std::size_t(maxCountPerLoop/Awg::PoolSize));
-    //根据每个线程任务能处理的数据长度确定需要划分多少个任务以及每个任务处理的数据长度,这里无需担心任务过多内存溢出,线程池执行完一轮任务才开始下一轮,所以是安全的
-    std::vector<std::size_t> taskCountVec = Awg::splitLengthMax(arrayLength,maxCountPerTask);
+    //首先计算文件和剩余内存的大小
+    const std::size_t rowLength = Awg::ArithmeticLengthSum<double>::value;
+    const std::size_t fileSize = rowLength * arrayLength;
+    const std::size_t freeMem = Awg::getFreeMemoryWindows() * 0.9;
+    //文件最大映射长度以
+    const std::size_t maxMapSize = std::min(fileSize,freeMem);
+    //根据最大映射长度计算线程池每一次循环能处理的最大点数
+    const std::size_t maxLengthPerLoop = std::ceil(double(maxMapSize) / rowLength);
+    //每一个线程任务能分配到的点数,但是这个点数不能小于每个线程能处理点数的最小值
+    const std::size_t maxLengthPerTask = std::max(std::ceil(double(maxLengthPerLoop)/Awg::PoolSize),std::ceil(Awg::MinArrayLength));
+    //根据每个线程能处理的最大点数划分线程任务
+    std::vector<std::size_t> taskCountVec = Awg::splitLengthMax(arrayLength,maxLengthPerTask);
 
-    QElapsedTimer timer;
-    //开始计算文件总大小和每一个任务的映射长度[需要注意顺序]
-    ThreadPool* pool =  Awg::globalThreadPool();
-    std::vector<std::future<std::size_t>> futures(taskCountVec.size());
-    std::size_t offset = 0;
-    timer.restart();
-    for(std::size_t i = 0; i < taskCountVec.size(); i++)
-    {
-        switch (FT)
-        {
-        case Awg::FmtTxt:futures[i] = pool->run(Awg::calculateTextLenght<Awg::Txt,double>,taskCountVec[i],array+offset);break;
-        case Awg::FmtCsv:futures[i] = pool->run(Awg::calculateTextLenght<Awg::Csv,double>,taskCountVec[i],array+offset);break;
-        }
-        offset += taskCountVec[i];
-    }
-    pool->waitforDone();
-    qDebug()<<"cal size:"<<timer.elapsed();
-
-    //线程池计算映射大小任务执行完毕之后开始计算文件总大小
-    std::size_t fileSize = 0;
-    std::vector<std::size_t> mapSizeVec(futures.size());
-    for(std::size_t i = 0; i < futures.size(); i++)
-    {
-        mapSizeVec[i] = futures[i].get();
-        fileSize += mapSizeVec[i];
-    }
-    timer.restart();
     QFile file(path);
     if(file.resize(fileSize))
     {
-        qDebug()<<"resize:"<<timer.elapsed();
         if(file.open(QIODevice::ReadWrite))
         {
-            timer.restart();
-            emit AWGSIG->sigFileProcessMax(arrayLength + arrayLength*0.02);//这里将最大进度增加2%,因为数据处理完毕之后拷贝到文件的映射中还需要一点时间
-            //文件resize和打开之后计算线程池需要执行多少轮任务
+            emit AWGSIG->sigFileProcessMax(arrayLength + arrayLength*0.02);//这里将最大进度增加2%,因为数据处理完毕之后解除映射可能还需要一点时间
+
             std::size_t fileOffset = 0;
-            auto mapSizeVecBeg = mapSizeVec.cbegin();
-            auto mapSizeVecEnd = mapSizeVec.cend();
             auto taskCountVecBeg = taskCountVec.cbegin();
-            const double* arrayBeg = array;
-            int loops = std::ceil(double(mapSizeVec.size()) / Awg::PoolSize);
-            for(int loop = 0; loop < loops; loop++)
+            auto taskCountVecEnd = taskCountVec.cend();
+
+            ThreadPool* pool =  Awg::globalThreadPool();
+            while (taskCountVecBeg < taskCountVecEnd)
             {
+                //每一轮获取线程池最大容量的任务数量,防止数组越界
+                auto taskCountVecL = taskCountVecBeg;
+                auto taskCountVecR = std::min(taskCountVecBeg + Awg::PoolSize,taskCountVecEnd);
+
+                //计算这一轮任务需要映射的长度和数组长度
                 std::size_t mapSize = 0;
-                auto mapSizeVecL = mapSizeVecBeg;
-                auto mapSizeVecR = mapSizeVecBeg + Awg::PoolSize;
-                //获取本轮任务的最后一个数组指针,避免数组越界
-                mapSizeVecR = std::min(mapSizeVecR,mapSizeVecEnd);
-                //计算映射大小
-                while (mapSizeVecL < mapSizeVecR)
+                while (taskCountVecL < taskCountVecR)
                 {
-                    mapSize += (*mapSizeVecL);
-                    ++mapSizeVecL;
+                    mapSize += (*taskCountVecL) * rowLength;
+                    ++taskCountVecL;
                 }
+                //将起始迭代器位置归位
+                taskCountVecL = taskCountVecBeg;
 
-                char* mapped = reinterpret_cast<char*>(file.map(fileOffset,mapSize));
-                char* bufStart = mapped;
-                while(mapSizeVecBeg < mapSizeVecR)
+                unsigned char* map = file.map(fileOffset,mapSize);
+                char* buf = reinterpret_cast<char*>(map);
+                while (taskCountVecL < taskCountVecR)
                 {
-                    switch (FT)
-                    {
-                    case Awg::FmtCsv: pool->run(&Awg::toBinaryCsv<double>,bufStart,(*taskCountVecBeg),arrayBeg);break;
-                    case Awg::FmtTxt: pool->run(&Awg::toBinaryTxt<double>,bufStart,(*taskCountVecBeg),arrayBeg);break;
-                    }
-                    fileOffset += (*mapSizeVecBeg);
-                    bufStart += (*mapSizeVecBeg);
-                    arrayBeg += (*taskCountVecBeg);
-
-                    ++mapSizeVecBeg;
-                    ++taskCountVecBeg;
+                    pool->run(&Awg::toBinaryTxtFixedWidth<double>,Awg::TextFormat(FT),buf,(*taskCountVecL),array);
+                    buf += (*taskCountVecL) * rowLength;
+                    array += (*taskCountVecL);
+                    ++taskCountVecL;
                 }
                 pool->waitforDone();
-                file.unmap(reinterpret_cast<unsigned char*>(mapped));
+                file.unmap(map);
+
+                //更新迭代器位置和映射数据等信息
+                taskCountVecBeg = taskCountVecR;
+                fileOffset += mapSize;
             }
             file.close();
-            qDebug()<<"output:"<<timer.elapsed();
             emit AWGSIG->sigFileProcess(arrayLength*0.02);//发送最后一点进度
         }
         else

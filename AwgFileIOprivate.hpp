@@ -11,6 +11,20 @@
 #endif
 
 namespace Awg {
+    //2026.1.15txt和csv的枚举值要和AwgFileIO.h中的枚举值保持一致
+    enum TextFormat{Txt,Csv};
+
+    inline const std::string& numericSpliter(TextFormat format)
+    {
+        static const std::string csv(",");
+        static const std::string txt(" ");
+        switch (format)
+        {
+            case Txt:return txt;
+            case Csv:return csv;
+            default:assert("error split type");
+        }
+    }
 
     /// 换行符
     const std::string NewLine = "\r\n";
@@ -32,8 +46,9 @@ namespace Awg {
     };
 
     ///每一种数据类型对应的字符串最大长度,可以根据实际情况更改
-    ///目前定义这些长度主要目的是在转换为字符串之前预估所需内存大小
-    /// 这里没有包含全部类型的数据,比如long、unsigned long 、long double等,如有需求请自行添加
+    ///目前定义这些长度主要目的是在转换为字符串之前预估所需内存大小,实际使用时可以根据数据范围调整输出字符串最大长度
+    ///比如整形long long数值范围在[4096,-4095]就可以将对应模板ArithmeticLength值调整为5字节而非20
+    ///这里没有包含全部类型的数据,比如long、unsigned long 、long double等,如有需求请自行添加
     template<typename T>
     struct ArithmeticLength
     {
@@ -97,7 +112,7 @@ namespace Awg {
     template<typename F>
     struct ArithmeticLengthSum<F>
     {
-        constexpr static int value = ArithmeticLength<F>::value + 2;//如果是最后一个就+2,这个2是std::string NewLine的长度
+        constexpr static int value = ArithmeticLength<F>::value + 2;//如果是最后一个就+2,这个2是换行符的长度
     };
 
     ///让全部指针指向下一个位置,这里需要添加对类型T的限制,判断是否全部都是数字类型
@@ -116,52 +131,46 @@ namespace Awg {
     }
 
     ///根据数据类型生成一个fmt格式字符串,浮点值
-    template<typename...T>
-    typename std::enable_if<std::is_floating_point<typename PackType<T...>::type>::value,std::string>::type
-    fmtFormat()
+    template<typename T>
+    typename std::enable_if<std::is_floating_point<T>::value,const std::string&>::type
+    numericFormat()
     {
-        constexpr int Width = ArithmeticLength<typename PackType<T...>::type>::value;
-        return fmt::format("{{:.{}g}}", Width);
+        constexpr int Width = ArithmeticLength<T>::value;
+        static std::string s = fmt::format("{{:<{}f}}", Width);//{{:<Nf}},其中N=Width表示:对于浮点值,左对齐,宽度不足width时补空格,浮点值不使用科学计数法
+        return s;
     }
 
     ///根据数据类型生成一个fmt格式字符串,整型值
-    template<typename...T>
-    typename std::enable_if<std::is_integral<typename PackType<T...>::type>::value,std::string>::type
-    fmtFormat()
+    template<typename T>
+    typename std::enable_if<std::is_integral<T>::value,const std::string&>::type
+    numericFormat()
     {
-        return std::string("{}");
+        constexpr int Width = ArithmeticLength<T>::value;
+        static std::string s = fmt::format("{{:<{}}}", Width);//{{:<N}},其中N=Width表示:对于整形值,左对齐,宽度不足width时补空格
+        return s;
     };
 
-    ///生成一个cvs格式的fmt::format_to的格式字符串,用于将N个数组写为N列的csv文件
+    ///对N个数组按行生成fmt::format_to的输出格式字符串,用于将N个数组写为N列的文本文件
     template<typename...T>
-    typename std::enable_if<IsArithmetic<T...>::value,std::string>::type
-    csvRowFormat(const T*...arrays)
+    typename std::enable_if<IsArithmetic<T...>::value,const std::string>::type
+    rowFormat(TextFormat tf,const T*...arrays)
     {
-        constexpr unsigned ArrayNum = sizeof... (arrays);
-        const std::string format = fmtFormat<T...>();
-
-        std::string ret;
-        for(unsigned i = 0; i < ArrayNum-1; i++)
-        {
-            ret.append(format + ","); //cvs格式文本用','分割
-        }
-        return ret.append(format+NewLine);
+        std::string s;
+        rowFormatImpl(tf,s,arrays...);
+        return s;
     }
 
-    ///生成一个txt格式的fmt::format_to的格式字符串,用于将N个数组写为N列的txt文件
-    template<typename...T>
-    typename std::enable_if<IsArithmetic<T...>::value,std::string>::type
-    txtRowFormat(const T*...arrays)
+    template<typename F,typename...T>
+    void rowFormatImpl(TextFormat tf,std::string& output,const F*,const T*...arrays)
     {
-        constexpr unsigned ArrayNum = sizeof... (arrays);
-        const std::string format = fmtFormat<T...>();
+        output.append(numericFormat<F>() + numericSpliter(tf));
+        rowFormatImpl(tf,output,arrays...);
+    }
 
-        std::string ret;
-        for(unsigned i = 0; i < ArrayNum-1; i++)
-        {
-            ret.append(format + " ");//txt文本用空格分割
-        }
-        return ret.append(format+NewLine);
+    template<typename F>
+    void rowFormatImpl(TextFormat,std::string& output,const F*)
+    {
+        output.append(numericFormat<F>() + NewLine);
     }
 
     ///将数组以csv格式写到output指针中,返回值为输出的起始到结束范围
@@ -169,7 +178,7 @@ namespace Awg {
     typename std::enable_if<IsArithmetic<T...>::value>::type
     toBinaryCsv(char* output,const std::size_t length,const T*...Arrays)
     {
-        const std::string format = csvRowFormat(Arrays...);
+        const std::string format = rowFormat(Awg::Csv,Arrays...);
         std::size_t process = 0;
         for(std::size_t i = 0; i < length; ++i,++process)
         {
@@ -189,7 +198,7 @@ namespace Awg {
     typename std::enable_if<IsArithmetic<T...>::value>::type
     toBinaryTxt(char* output,const std::size_t length,const T*...Arrays)
     {
-        std::string format = txtRowFormat(Arrays...);
+        std::string format = rowFormat(Awg::Txt,Arrays...);
         std::size_t process = 0;
         char* pos = output;
         for(std::size_t i = 0; i < length; ++i,++process)
@@ -206,27 +215,46 @@ namespace Awg {
         emit AWGSIG->sigFileProcess(process);
     }
 
-    //2026.1.15txt和csv的枚举值要和AwgFileIO.h中的枚举值保持一致
-    enum TextFormat{Txt,Csv};
-
-    ///计算长度为length的数组T...转换为字符串之后的总长度
-    template<TextFormat Fmt,typename...T>
-    typename std::enable_if<IsArithmetic<T...>::value,std::size_t>::type
-    calculateTextLenght(const std::size_t length,const T*...Arrays)
+    ///计算长度为length的数组T...转换为字符串,但是每个数值转换的字符串长度固定
+    template<typename...T>
+    typename std::enable_if<IsArithmetic<T...>::value>::type
+    toBinaryTxtFixedWidth(TextFormat tf,char* output,const std::size_t arrayLenth,const T*...Arrays)
     {
-        std::size_t txtSize = 0;
-        std::string format = (Fmt == Txt) ? txtRowFormat(Arrays...) : csvRowFormat(Arrays...);
-        const std::size_t rowLenght = 256 * sizeof...(Arrays);//给每个变量预留256字节空间,每一行的空间就是256*N
-        char buffer[rowLenght];
-        char* end = buffer;
-        for(std::size_t i = 0; i < length; ++i)
+        std::size_t process = 0;
+        char* pos = output;
+        for(std::size_t i = 0; i < arrayLenth; ++i,++process)
         {
-            end = fmt::format_to(buffer,format,*Arrays...);
-            next(Arrays...);
-            txtSize += (end - buffer);
+            toText_FWImpl(tf,output,Arrays...);//递归写入第i行数据
+            next(Arrays...);//准备下一行
+            if(process > 1e6)
+            {
+                emit AWGSIG->sigFileProcess(process);//每转换1M个点发送一次信号更新进度
+                process = 0;
+            }
+            output = pos;
         }
-        return txtSize;
+        emit AWGSIG->sigFileProcess(process);
     }
+
+    template<typename F,typename...T>
+    typename std::enable_if<IsArithmetic<T...>::value>::type
+    toText_FWImpl(TextFormat tf,char* output,const F* First,const T*...Arrays)
+    {
+        const std::string& nf = numericFormat<F>();
+        output = fmt::format_to_n(output,ArithmeticLength<F>::value, nf,*First).out;//将浮点值以固定宽度写入内存
+        output = fmt::format_to(output,"{}",numericSpliter(tf));//数值输出完成之后添加一个分隔符(如果后面还有数组N列数组)
+        toText_FWImpl(tf,output,Arrays...);//递归输出下一个数组的元素
+    }
+
+    template<typename F>
+    typename std::enable_if<IsArithmetic<F>::value>::type
+    toText_FWImpl(TextFormat tf,char* output,const F* First)
+    {
+        const std::string& nf = numericFormat<F>();
+        output = fmt::format_to_n(output,ArithmeticLength<F>::value, nf,*First).out;//将浮点值以固定宽度写入内存
+        output = fmt::format_to(output,"{}",Awg::NewLine);//如果是最后一个数组在写入完毕之后添加换行符
+    }
+
 }
 
 #endif // AWGFILEIOPRIVATE_H
