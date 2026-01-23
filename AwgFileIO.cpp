@@ -4,7 +4,7 @@
 
 #include "UtilitySubSystem/AwgFileIOprivate.hpp"
 #include "UtilitySubSystem/AwgUtility.h"
-#include "UtilitySubSystem/AwgAlgorithm.old.h"
+#include "UtilitySubSystem/AwgAlgorithm.h"
 #include "UtilitySubSystem/ThreadPool.hpp"
 #include "UtilitySubSystem/fastfloat/fast_float.h"
 

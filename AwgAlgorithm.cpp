@@ -1,7 +1,9 @@
-#include "AwgAlgorithm.hpp"
+#include "AwgAlgorithm.h"
 #include "UtilitySubSystem/AwgUtility.h"
-#include "UtilitySubSystem/ThreadPool.hpp"
-
+#include <iostream>
+#include <algorithm>
+#include <cmath>
+#include <random>
 #include <QFile>
 
 namespace Awg
@@ -17,6 +19,7 @@ namespace Awg
         return count;
     }
 
+#ifdef __AVX2__
     std::size_t countCharAvx2(const char* beg, const char* end, char target) noexcept
     {
         const int step = Awg::ArrayAlignment;
@@ -42,6 +45,7 @@ namespace Awg
         // 处理剩余的不够32字节的部分
         return count + countCharScalar(beg,end,target);
     }
+#endif
 
     const char* findCharScalar(const char *beg, const char *end, char target) noexcept
     {
@@ -54,6 +58,7 @@ namespace Awg
         return nullptr;
     }
 
+#ifdef __AVX2__
     const char* findCharAvx2(const char *beg, const char *end, char target) noexcept
     {
         const std::size_t step = Awg::ArrayAlignment;
@@ -73,8 +78,9 @@ namespace Awg
 
         return findCharScalar(beg,end,target);
     }
+#endif
 
-    void compressShort12BitScalar(const short *begin, const short *end, char *output)
+    void compressShort12BitScalar(bool bigEndian,const short *begin, const short *end, char *output)
     {
         //每2个short最终占用3字节内存
         unsigned short first = 0,second = 0;
@@ -82,10 +88,18 @@ namespace Awg
         {
             first = begin[0] & 0xFFF;
             second = begin[1] & 0xFFF;
-
-            output[0] = static_cast<char>(first >> 4);;//static_cast<char>(first << 8);
-            output[1] = static_cast<char>((first & 0xF) << 4) |  static_cast<char>(second >> 8);;//static_cast<char>(first << 12) |  static_cast<char>(seconde << 4) ;
-            output[2] = static_cast<char>(second & 0xFF); ;//static_cast<char>(second << 8);
+            if(bigEndian)
+            {
+                output[0] = static_cast<char>(first >> 4);
+                output[1] = static_cast<char>((first & 0xF) << 4) |  static_cast<char>(second >> 8);
+                output[2] = static_cast<char>(second & 0xFF);
+            }
+            else
+            {
+                output[0] = static_cast<char>(((second & 0xF) << 4) | ((first >> 8) & 0xF));
+                output[1] = static_cast<char>(first & 0xFF);
+                output[2] = static_cast<char>(second >> 4);
+            }
 
             begin += 2;
             output += 3;
@@ -95,12 +109,21 @@ namespace Awg
         if(begin != end)
         {
             first = (*begin) & 0xFFF;
-            output[0] = static_cast<char>(first >> 4);
-            output[1] = static_cast<char>((first & 0xF) << 4);
+            if(bigEndian)
+            {
+                output[0] = static_cast<char>(first >> 4);
+                output[1] = static_cast<char>((first & 0xF) << 4);
+            }
+            else
+            {
+                output[0] = static_cast<char>(first & 0xFF);        // 低8位
+                output[1] = static_cast<char>((first >> 8) & 0xF);  // 高4位在低4位位置
+            }
         }
     }
 
-    void compressShort12BitAvx2(const short *begin, const short *end, char *output)
+#ifdef __AVX2__
+    void compressShort12BitAvx2(bool bigEndian,const short *begin, const short *end, char *output)
     {
         const std::size_t chunkLeng = Awg::ArrayAlignment / sizeof (short);
         __m256i dataVec = _mm256_setzero_si256();
@@ -113,9 +136,9 @@ namespace Awg
                                                    3,0,1,2,7,4,5,6,11,8,9,10,15,12,13,14);
         const __m256i bigEndianMask = _mm256_setr_epi8(1,0,2,5,4,6,9,8,10,13,12,14,3,7,11,15,
                                                        1,0,2,5,4,6,9,8,10,13,12,14,3,7,11,15);//按大端模式重排字节顺序
-        const __m256i littleEndianMask = _mm256_setr_epi8(0,1,5,2,6,4,8,9,13,10,14,12,3,7,11,15,
-                                                          0,1,5,2,6,4,8,9,13,10,14,12,3,7,11,15);//按小端模式重排字节顺序
-
+        const __m256i littleEndianMask = _mm256_setr_epi8(0,1,5,2,6,4,8,9,13,10,14,12,7,3,15,11,
+                                                          0,1,5,2,6,4,8,9,13,10,14,12,7,3,15,11);//按小端模式重排字节顺序
+        __m256i setLow16bitToZero = _mm256_setr_epi64x(0xFFFFFFFFFFFFFFFF,0xFFFFFFFFFFFFFFFF,0xFFFFFFFFFFFFFFFF,0x0000000000000000);
         __m256i permutexMask = _mm256_setr_epi32(0,1,2,4,5,6,3,7);
         while (begin + chunkLeng <= end)
         {
@@ -126,8 +149,9 @@ namespace Awg
             orVec = _mm256_blendv_epi8(orVec,dataVec,orMask);//提取指定位上的8bit数据
             orVec = _mm256_shuffle_epi8(orVec,orShuffle);//洗牌之后需要合并的bit位已经在目标位置上了,直接跟源寄存器做或运算
             dataVec = _mm256_or_si256(dataVec,orVec);//求或运算完成数据拼接
-            dataVec = _mm256_shuffle_epi8(dataVec,bigEndianMask);//对拼接好的数据重新排序,可以自行选择大端排序或者小端排序
+            dataVec = bigEndian ? _mm256_shuffle_epi8(dataVec,bigEndianMask) : _mm256_shuffle_epi8(dataVec,littleEndianMask);//对拼接好的数据重新排序,可以自行选择大端排序或者小端排序
             dataVec = _mm256_permutevar8x32_epi32(dataVec,permutexMask);//将拼接好的数据放到寄存器前面,无效数据放到寄存器最后
+            dataVec = _mm256_and_si256(dataVec,setLow16bitToZero);//将最后8字节清零,因为最后8字节残留了无效的数据,不清零会污染波形数据
             _mm256_storeu_si256(reinterpret_cast<__m256i*>(output),dataVec);
 
             //实际上这里写入了12字节的无效数据,所以这里output指针只跳过24
@@ -136,8 +160,9 @@ namespace Awg
         }
 
         //最后处理无法使用AVX指令处理的数据
-        compressShort12BitScalar(begin,end,output);
+        compressShort12BitScalar(bigEndian,begin,end,output);
     }
+#endif
 
     void normalizationScalar(const float* inputBegin,const float* inputEnd,float* outputIterator,const float inputMin,const float inputMax,const float outputMin,const float outputMax)
     {
@@ -150,6 +175,7 @@ namespace Awg
     }
 
     ///这个函数在仅在当前文件中被调用,因此可以保证inputBegin地址是按32字节对齐的,所以这里不需要额外处理未对齐的数据
+#ifdef __AVX2__
     void normalizationAvx2(const float* inputBegin,const float* inputEnd,float* outputIterator,const float inputMin,const float inputMax,const float outputMin,const float outputMax)
     {
         const std::size_t step = Awg::ArrayAlignment / sizeof (float);
@@ -175,7 +201,170 @@ namespace Awg
         //处理剩下的数据
         normalizationScalar(inputBegin,inputEnd,outputIterator,inputMin,inputMax,outputMin,outputMax);
     }
+#endif
+
+    ///计算正弦波形数据,数组为output,计算出来的数据写到[beg,end)区间
+    void outputSinScalar(std::size_t totalPoints,float phaseRad,const float* output,float* beg,float* end)
+    {
+        while (beg < end)
+        {
+            float rad = 2.0 * Awg::PI * (beg - output) / totalPoints + phaseRad;
+            *beg = Awg::Amplitude * (std::sin(rad)+1)/2;
+            ++beg;
+        }
+    }
+
+#ifdef __AVX2__
+    void outputSinAvx2(std::size_t totalPoints,float phaseRad,const float* output,float* beg,float* end)
+    {
+        constexpr int chunk = Awg::ArrayAlignment / sizeof (float);
+        const  __m256 piMul2 = _mm256_set1_ps(2.0*Awg::PI);
+        const __m256 phaseRadVec = _mm256_set1_ps(phaseRad);
+        const __m256 totalPointsVec = _mm256_set1_ps(totalPoints);
+        const __m256 amplVec = _mm256_set1_ps(Awg::Amplitude);
+        __m256 retVec = _mm256_set1_ps(0);
+        __m256 indexVc = _mm256_set1_ps(0);
+        while (beg + chunk <= end)
+        {
+            float index = beg - output;
+            indexVc = _mm256_setr_ps(index,index+1,index+2,index+3,index+4,index+5,index+6,index+7);
+            retVec = _mm256_mul_ps(indexVc,piMul2);
+            retVec = _mm256_div_ps(retVec,totalPointsVec);
+            retVec = _mm256_add_ps(retVec,phaseRadVec);
+            //-o0优化下xsimd::sin的效率显著低于AvxSin::sinAvx2HighPrecision,但是在-o2优化下又于AvxSin::sinAvx2HighPrecision
+            retVec = xsimd::sin(xsimd::batch<float,xsimd::avx>(retVec));//这里-o0优化并且直接指定axv2反而会导致段错误,很奇怪。
+            retVec = _mm256_add_ps(retVec,_mm256_set1_ps(1.0));
+            retVec = _mm256_div_ps(retVec,_mm256_set1_ps(2.0));
+            retVec = _mm256_mul_ps(retVec,amplVec);
+            _mm256_storeu_ps(beg,retVec);
+
+            beg += chunk;
+        }
+        // 处理剩余的元素(不足4个的情况)
+        outputSinScalar(totalPoints,phaseRad,output,beg,end);
+    }
+#endif
+
+    void outputSquareScalar(const float* edge,float* beg,float* end)
+    {
+        while (beg < end)
+        {
+            *beg = (beg < edge) * Awg::Amplitude;//小于占空比索引为高电平,大于为低电平
+            ++beg;
+        }
+    }
+
+#ifdef __AVX2__
+    void outputSquareAvx2(const float* edge,float* beg,float* end)
+    {
+        constexpr int chunk = Awg::ArrayAlignment / sizeof (float);
+        const __m256 amplVec = _mm256_set1_ps(Awg::Amplitude);
+        const __m256 zeroVec = _mm256_setzero_ps();
+
+        while (beg + chunk <= end)
+        {
+            float* thunkEnd = beg + chunk;
+            if(beg < edge && edge < thunkEnd)// 跨越边界的情况，逐个处理
+            {
+                while (beg < thunkEnd)
+                {
+                    *beg = (beg < edge) * Awg::Amplitude;
+                    ++beg;
+                }
+            }
+            else
+            {
+                if(thunkEnd <= edge)// 整个chunk都在edgeIndex左侧
+                    _mm256_storeu_ps(beg, amplVec);
+                else// 整个chunk都在edgeIndex右侧
+                    _mm256_storeu_ps(beg, zeroVec);
+                beg += chunk;
+            }
+        }
+
+        // 处理剩余元素
+        outputSquareScalar(edge,beg,end);
+    }
+#endif
+
+    void outputTriangleScalar(float raiseK,float raiseB,float fallK,float fallB,const float* output,const float* peak,float* beg,float* end)
+    {
+        while (beg < end)
+        {
+            if(beg < peak)
+                *beg = raiseK * (beg - output) + raiseB;
+            else
+                *beg = fallK * (beg - output) + fallB;
+            ++beg;
+        }
+    }
+
+#ifdef __AVX2__
+    void outputTriangleAvx2(float raiseK,float raiseB,float fallK,float fallB,const float* output,const float* peak,float* beg,float* end)
+    {
+        constexpr int chunk = Awg::ArrayAlignment / sizeof (float);
+        const __m256 raiseBvec = _mm256_set1_ps(raiseB);
+        const __m256 fallBvec = _mm256_set1_ps(fallB);
+        const __m256 raiseKvec = _mm256_set1_ps(raiseK);
+        const __m256 fallKvec = _mm256_set1_ps(fallK);
+        __m256 indexVec = _mm256_setzero_ps();
+        __m256 dataVec = _mm256_setzero_ps();
+        while (beg + chunk <= end)
+        {
+            float* thunkEnd = beg + chunk;
+            if(beg < peak && peak < thunkEnd)
+            {
+                if(beg < peak)
+                    *beg = raiseK * (beg - output) + raiseB;
+                else
+                    *beg = fallK * (beg - output) + fallB;
+                ++beg;
+            }
+            else
+            {
+                std::size_t index = beg - output;
+                indexVec = _mm256_setr_ps(index,index+1,index+2,index+3,index+4,index+5,index+6,index+7);//索引反向加载
+                if(thunkEnd <= peak)
+                {
+                    dataVec = _mm256_mul_ps(raiseKvec,indexVec);
+                    dataVec = _mm256_add_ps(dataVec,raiseBvec);
+                }
+                else
+                {
+                    dataVec = _mm256_mul_ps(fallKvec,indexVec);
+                    dataVec = _mm256_add_ps(dataVec,fallBvec);
+                }
+                _mm256_storeu_ps(beg,dataVec);
+
+                beg += chunk;
+            }
+        }
+        //处理剩余元素
+        outputTriangleScalar(raiseK,raiseB,fallK,fallB,output,peak,beg,end);
+    }
+#endif
 }
+#include <QDebug>
+    void Awg::test()
+    {
+        short original[20] = {0x123,0x456,0x789,0xabc,0xdef
+            ,0x123,0x456,0x789,0xabc,0xdef
+        ,0x123,0x456,0x789,0xabc,0xdef
+        ,0x123,0x456,0x789,0xabc,0xdef};
+
+        char opt1[30];
+        char opt2[30];
+        char opt3[30];
+        char opt4[30];
+        Awg::compressShort12BitAvx2(true,original,original+20,opt1);
+        Awg::compressShort12BitScalar(true,original,original+20,opt2);
+        Awg::compressShort12BitAvx2(false,original,original+20,opt3);
+        Awg::compressShort12BitScalar(false,original,original+20,opt4);
+        for(int i = 0; i < 30; i++)
+        {
+            qDebug()<<opt1[i]<<opt2[i]<<opt3[i]<<opt4[i];
+        }
+    }
 
 bool Awg::isFloatBegin(char c) noexcept
 {
@@ -297,9 +486,9 @@ void Awg::reverse(char *beg, char *end)
 void Awg::compressShort12Bit(const short *begin, const short *end, char *output)
 {
 #ifdef __AVX2__
-    Awg::compressShort12BitAvx2(begin,end,output);
+    Awg::compressShort12BitAvx2(true,begin,end,output);
 #else
-    Awg::compressShort12BitScalar(begin,end,output);
+    Awg::compressShort12BitScalar(true,begin,end,output);
 #endif
 }
 
@@ -505,4 +694,167 @@ std::vector<std::size_t> Awg::splitLengthAligned(std::size_t length,std::size_t 
         }
     }
     return vec;
+}
+
+AwgFloatArray Awg::generateSin(float sampleRate, float frequency, float phase)
+{
+    // 计算一个完整周期内的采样点数
+    const std::size_t totalPoints = std::round(sampleRate / frequency);
+    const float phaseRad = phase * Awg::PI / 180.0;
+
+    if (totalPoints == 0)
+    {
+        std::cerr << "Error: sampleRate must be greater than frequency" << std::endl;
+        return AwgFloatArray{};
+    }
+
+    // 分配内存存储波形数据
+    AwgFloatArray waveform(totalPoints);
+
+    if (waveform == nullptr)
+    {
+        std::cerr << "Error: Memory allocation failed" << std::endl;
+        return AwgFloatArray{};
+    }
+
+    //每一个线程处理的点数为总点数/线程数再向上取整
+    std::size_t index = 0;
+    std::vector<std::size_t> chunks = Awg::splitLengthAligned(totalPoints,Awg::MinArrayLength,Awg::ArrayAlignment/sizeof(double));
+    ThreadPool* pool = Awg::globalThreadPool();
+    for(std::size_t i = 0; i < chunks.size(); i++)
+    {
+        float* output = waveform.data();
+        float* beg = output + index;
+        float* end = beg + chunks[i];
+#if __AVX2__
+        pool->run<ThreadPool::Ordered>(Awg::outputSinAvx2,totalPoints,phaseRad,output,beg,end);
+#else
+        pool->run<ThreadPool::Ordered>(Awg::outputSinScalar,totalPoints,phaseRad,output,beg,end);
+#endif
+        index += chunks[i];
+    }
+
+    pool->waitforDone();
+    return waveform;
+}
+
+AwgFloatArray Awg::generateSquare(float sampleRate, float frequency, float duty)
+{
+    //每个周期最少100个点,这样可以将占空比的精度控制到1%
+    const unsigned minPointsPerPeriod = 100;
+    const std::size_t totalPoints = std::round(sampleRate / frequency);
+    if(totalPoints < minPointsPerPeriod)
+        return AwgFloatArray{};
+
+    // 分配内存存储波形数据
+    AwgFloatArray waveform(totalPoints);
+
+    //将占空比限制到0和1之间
+    duty = std::max(duty,0.0f);
+    duty = std::min(duty,1.0f);
+    std::size_t edgeIndex = std::round(totalPoints * duty);
+    float* output = waveform.data();
+    float* edge = output + edgeIndex;
+
+    //每一个线程处理的点数为总点数/线程数再向上取整
+    std::size_t index = 0;
+    std::vector<std::size_t> chunks = Awg::splitLengthAligned(totalPoints,Awg::MinArrayLength,Awg::ArrayAlignment/sizeof(double));
+    ThreadPool* pool = Awg::globalThreadPool();
+    for(std::size_t i = 0; i < chunks.size(); i++)
+    {
+        float* beg = output + index;
+        float* end = beg + chunks[i];
+#ifdef __AVX2__
+        pool->run<ThreadPool::Ordered>(Awg::outputSquareAvx2,edge,beg,end);
+#else
+        pool->run<ThreadPool::Ordered>(Awg::outputSquareScalar,edge,beg,end);
+#endif
+        index += chunks[i];
+    }
+
+    pool->waitforDone();
+    return waveform;
+}
+
+AwgFloatArray Awg::generateTriangle(float sampleRate, float frequency, float symmetry)
+{
+    //每个周期最少100个点,这样可以将对称性的精度控制到1%
+    const unsigned minPointsPerPeriod = 100;
+    const std::size_t totalPoints = std::round(sampleRate / frequency);
+    if(totalPoints < minPointsPerPeriod)
+        return AwgFloatArray{};
+
+    // 分配内存存储波形数据
+    AwgFloatArray waveform(totalPoints);
+
+    //将占空比限制到0和1之间
+    symmetry = std::max(symmetry,0.0f);
+    symmetry = std::min(symmetry,1.0f);
+
+    struct Points
+    {
+        float x = 0;
+        float y = 0;
+    };
+    std::size_t peakIndex = std::round(totalPoints * symmetry);
+
+    //这里需要处理对称性为0或者1的情况
+    float raiseK = 1 ,raiseB = 0,fallK = 1,fallB = 0;
+
+    if(symmetry == 0)
+    {
+        fallK = float(0 - Awg::Amplitude) / (totalPoints - 0);
+        fallB = Awg::Amplitude;
+    }
+    else if (symmetry == 1)
+    {
+        raiseK = float(Awg::Amplitude - 0) / (totalPoints - 0);
+        raiseB = 0;
+    }
+    else
+    {
+        raiseK =float(Awg::Amplitude - 0)/ (peakIndex - 0);
+        raiseB = Awg::Amplitude - raiseK * peakIndex;
+        fallK = float(0 - Awg::Amplitude) / (totalPoints - peakIndex);
+        fallB =  Awg::Amplitude - fallK*peakIndex;
+    }
+    float* output = waveform.data();
+    float* peak = output + peakIndex;
+
+    //每一个线程处理的点数为总点数/线程数再向上取整
+    std::size_t index = 0;
+    std::vector<std::size_t> chunks = Awg::splitLengthAligned(totalPoints,Awg::MinArrayLength,Awg::ArrayAlignment/sizeof(double));
+    ThreadPool* pool = Awg::globalThreadPool();
+    for(std::size_t i = 0; i < chunks.size(); i++)
+    {
+        float* beg = output + index;
+        float* end = beg + chunks[i];
+#ifdef __AVX2__
+        pool->run<ThreadPool::Ordered>(Awg::outputTriangleAvx2,raiseK,raiseB,fallK,fallB,output,peak,beg,end);
+#else
+        pool->run<ThreadPool::Ordered>(Awg::outputTriangleScalar,raiseK,raiseB,fallK,fallB,output,peak,beg,end);
+#endif
+        index += chunks[i];
+    }
+
+    pool->waitforDone();
+    return waveform;
+}
+
+AwgFloatArray Awg::generateNoise(float sampleRate, float bandWidth)
+{
+#if 0
+    //mingw的编译器实现似乎有bug,std::random_device生成的种子一直是同一个值,所以这里采用别的方式获取随机种子
+    std::random_device rd;
+    std::size_t seed = rd();
+#else
+    std::size_t time = std::chrono::system_clock::now().time_since_epoch().count();
+    std::size_t seed = time % std::numeric_limits<uint>::max();
+#endif
+    std::mt19937_64 engine(seed);
+    std::uniform_int_distribution<short> dis(0,4096);
+    for(int i = 0; i < 100; i++)
+    {
+        int a = dis(engine);
+    }
 }

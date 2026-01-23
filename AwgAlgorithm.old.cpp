@@ -1212,11 +1212,11 @@ AwgShortArray AwgOld::doubleToShortMT(const AwgDoubleArray &array)
     return output;
 }
 
-AwgDoubleArray Awg::generateSin(double sampleRate, double frequency, double phase)
+AwgDoubleArray AwgOld::generateSin(double sampleRate, double frequency, double phase)
 {
     // 计算一个完整周期内的采样点数
     const std::size_t totalPoints = std::round(sampleRate / frequency);
-    const double phaseRad = phase * PI / 180.0;
+    const double phaseRad = phase * Awg::PI / 180.0;
     
     if (totalPoints == 0)
     {
@@ -1254,7 +1254,7 @@ AwgDoubleArray Awg::generateSin(double sampleRate, double frequency, double phas
     return waveform;
 }
 
-AwgDoubleArray Awg::generateSquare(double sampleRate, double frequency, double duty)
+AwgDoubleArray AwgOld::generateSquare(double sampleRate, double frequency, double duty)
 {
     //每个周期最少100个点,这样可以将占空比的精度控制到1%
     const unsigned minPointsPerPeriod = 100;
