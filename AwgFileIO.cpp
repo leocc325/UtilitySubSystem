@@ -4,17 +4,17 @@
 
 #include "UtilitySubSystem/AwgFileIOprivate.hpp"
 #include "UtilitySubSystem/AwgUtility.h"
-#include "UtilitySubSystem/AwgAlgorithm.h"
+#include "UtilitySubSystem/AwgAlgorithm.old.h"
 #include "UtilitySubSystem/ThreadPool.hpp"
 #include "UtilitySubSystem/fastfloat/fast_float.h"
 
 std::mutex FileMutex;
 
 template<Awg::FileFormat FT>
-void storeTextFile(const QString &path, const double *array, const std::size_t arrayLength)
+void storeTextFile(const QString &path, const Awg::DT *array, const std::size_t arrayLength)
 {
     //首先计算文件和剩余内存的大小
-    const std::size_t rowLength = Awg::ArithmeticLengthSum<double>::value;
+    const std::size_t rowLength = Awg::ArithmeticLengthSum<Awg::DT>::value;
     const std::size_t fileSize = rowLength * arrayLength;
     const std::size_t freeMem = Awg::getFreeMemoryWindows() * 0.9;
     //文件最大映射长度以
@@ -58,7 +58,7 @@ void storeTextFile(const QString &path, const double *array, const std::size_t a
                 char* buf = reinterpret_cast<char*>(map);
                 while (taskCountVecL < taskCountVecR)
                 {
-                    pool->run(&Awg::toBinaryTxtFixedWidth<double>,Awg::TextFormat(FT),buf,(*taskCountVecL),array);
+                    pool->run(&Awg::toBinaryTxtFixedWidth<Awg::DT>,Awg::TextFormat(FT),buf,(*taskCountVecL),array);
                     buf += (*taskCountVecL) * rowLength;
                     array += (*taskCountVecL);
                     ++taskCountVecL;
@@ -84,7 +84,7 @@ void storeTextFile(const QString &path, const double *array, const std::size_t a
     }
 }
 
-void Awg::storeBinFile(const QString &path, const double *array, const std::size_t length)
+void Awg::storeBinFile(const QString &path, const Awg::DT *array, const std::size_t length)
 {
     if(array == nullptr || length == 0)
     {
@@ -93,7 +93,7 @@ void Awg::storeBinFile(const QString &path, const double *array, const std::size
     }
 
     QFile file(path);
-    const std::size_t totalSize = sizeof (double) * length;
+    const std::size_t totalSize = sizeof (Awg::DT) * length;
     if(file.resize(totalSize))
     {
         unsigned char* buf = file.map(0,totalSize);
@@ -103,7 +103,7 @@ void Awg::storeBinFile(const QString &path, const double *array, const std::size
     }
 }
 
-void Awg::storeCsvFile(const QString &path, const double *array, const std::size_t length)
+void Awg::storeCsvFile(const QString &path, const Awg::DT *array, const std::size_t length)
 {
     if(array == nullptr || length == 0)
     {
@@ -114,7 +114,7 @@ void Awg::storeCsvFile(const QString &path, const double *array, const std::size
     storeTextFile<Awg::FmtCsv>(path,array,length);
 }
 
-void Awg::storeTxtFile(const QString &path, const double *array, const std::size_t length)
+void Awg::storeTxtFile(const QString &path, const Awg::DT *array, const std::size_t length)
 {
     if(array == nullptr || length == 0)
     {
@@ -125,13 +125,13 @@ void Awg::storeTxtFile(const QString &path, const double *array, const std::size
     storeTextFile<Awg::FmtTxt>(path,array,length);
 }
 
-AwgDoubleArray Awg::loadBinFile(const QString &path)
+AwgFloatArray Awg::loadBinFile(const QString &path)
 {
     QFile file(path);
     if(file.size() == 0  ||  file.size() > Awg::getFreeMemoryWindows()*0.9)
     {
         emit AWGSIG->sigWarningMessage(QCoreApplication::translate("Awg","文件%1为空或者内存不足无法加载").arg(file.fileName()));
-        return AwgDoubleArray{};
+        return AwgFloatArray{};
     }
 
     if(file.open(QIODevice::ReadOnly))
@@ -144,45 +144,45 @@ AwgDoubleArray Awg::loadBinFile(const QString &path)
         if(taskNum == 0)
         {
             emit AWGSIG->sigWarningMessage(QCoreApplication::translate("Awg","文件%1拆分失败").arg(file.fileName()));
-            return AwgDoubleArray{};
+            return AwgFloatArray{};
         }
         else
         {
-            std::vector<std::future<AwgDoubleArray>> futures;
+            std::vector<std::future<AwgFloatArray>> futures;
             futures.reserve(taskNum);
 
             emit AWGSIG->sigFileProcessMax(file.size());
             std::size_t mapOffset = 0;
             for(unsigned i = 0; i < taskNum; i++)
             {
-                std::future<AwgDoubleArray> f = pool->run<ThreadPool::Ordered>(&Awg::processBinFile,&file,mapOffset,chunkSizes[i]);
+                std::future<AwgFloatArray> f = pool->run<ThreadPool::Ordered>(&Awg::processBinFile,&file,mapOffset,chunkSizes[i]);
                 futures.push_back(std::move(f));
                 mapOffset += chunkSizes[i];
             }
             pool->waitforDone();
 
             //将各个线程的运算结果汇总
-            std::vector<AwgDoubleArray> vec;
+            std::vector<AwgFloatArray> vec;
             vec.reserve(futures.size());
-            for(std::future<AwgDoubleArray>& f : futures)
+            for(std::future<AwgFloatArray>& f : futures)
             {
                 vec.push_back(f.get());
             }
-            AwgDoubleArray result = AwgDoubleArray::combine(vec);
+            AwgFloatArray result = AwgFloatArray::combine(vec);
             return result;
         }
     }
 
-    return AwgDoubleArray{};
+    return AwgFloatArray{};
 }
 
-AwgDoubleArray Awg::loadCsvFile(const QString &path)
+AwgFloatArray Awg::loadCsvFile(const QString &path)
 {
     QFile file(path);
     if(file.size() == 0  ||  file.size() > Awg::getFreeMemoryWindows()*0.9)
     {
         emit AWGSIG->sigWarningMessage(QCoreApplication::translate("Awg","文件%1为空或者内存不足无法加载").arg(file.fileName()));
-        return AwgDoubleArray{};
+        return AwgFloatArray{};
     }
 
     if(file.open(QIODevice::ReadOnly))
@@ -196,18 +196,18 @@ AwgDoubleArray Awg::loadCsvFile(const QString &path)
         if(taskNum == 0)
         {
             emit AWGSIG->sigWarningMessage(QCoreApplication::translate("Awg","文件%1拆分失败").arg(file.fileName()));
-            return AwgDoubleArray{};
+            return AwgFloatArray{};
         }
         else
         {
-            std::vector<std::future<AwgDoubleArray>> futures;
+            std::vector<std::future<AwgFloatArray>> futures;
             futures.reserve(taskNum);
 
             emit AWGSIG->sigFileProcessMax(file.size());
             std::size_t mapOffset = 0;
             for(unsigned i = 0; i < taskNum; i++)
             {
-                std::future<AwgDoubleArray> f = pool->run<ThreadPool::Ordered>(&Awg::processTextFile,&file,mapOffset,chunkSizes[i],spliters);
+                std::future<AwgFloatArray> f = pool->run<ThreadPool::Ordered>(&Awg::processTextFile,&file,mapOffset,chunkSizes[i],spliters);
                 futures.push_back(std::move(f));
                 mapOffset += chunkSizes[i];
             }
@@ -215,27 +215,27 @@ AwgDoubleArray Awg::loadCsvFile(const QString &path)
             pool->waitforDone();
 
             //将各个线程的运算结果汇总
-            std::vector<AwgDoubleArray> vec;
+            std::vector<AwgFloatArray> vec;
             vec.reserve(futures.size());
-            for(std::future<AwgDoubleArray>& f : futures)
+            for(std::future<AwgFloatArray>& f : futures)
             {
                 vec.push_back(f.get());
             }
-            AwgDoubleArray result = AwgDoubleArray::combine(vec);
+            AwgFloatArray result = AwgFloatArray::combine(vec);
             return result;
         }
     }
 
-    return AwgDoubleArray{};
+    return AwgFloatArray{};
 }
 
-AwgDoubleArray Awg::loadTxtFile(const QString &path)
+AwgFloatArray Awg::loadTxtFile(const QString &path)
 {
     QFile file(path);
     if(file.size() == 0  ||  file.size() > Awg::getFreeMemoryWindows()*0.9)
     {
         emit AWGSIG->sigWarningMessage(QCoreApplication::translate("Awg","文件%1为空或者内存不足无法加载").arg(file.fileName()));
-        return AwgDoubleArray{};
+        return AwgFloatArray{};
     }
 
     if(file.open(QIODevice::ReadOnly))
@@ -248,18 +248,18 @@ AwgDoubleArray Awg::loadTxtFile(const QString &path)
         if(taskNum == 0)
         {
             emit AWGSIG->sigWarningMessage(QCoreApplication::translate("Awg","文件%1拆分失败").arg(file.fileName()));
-            return AwgDoubleArray{};
+            return AwgFloatArray{};
         }
         else
         {
-            std::vector<std::future<AwgDoubleArray>> futures;
+            std::vector<std::future<AwgFloatArray>> futures;
             futures.reserve(taskNum);
 
             emit AWGSIG->sigFileProcessMax(file.size());
             std::size_t mapOffset = 0;
             for(unsigned i = 0; i < taskNum; i++)
             {
-                std::future<AwgDoubleArray> f = pool->run<ThreadPool::Ordered>(&Awg::processTextFile,&file,mapOffset,chunkSizes[i],spliters);
+                std::future<AwgFloatArray> f = pool->run<ThreadPool::Ordered>(&Awg::processTextFile,&file,mapOffset,chunkSizes[i],spliters);
                 futures.push_back(std::move(f));
                 mapOffset += chunkSizes[i];
             }
@@ -267,21 +267,21 @@ AwgDoubleArray Awg::loadTxtFile(const QString &path)
             pool->waitforDone();
 
             //将各个线程的运算结果汇总
-            std::vector<AwgDoubleArray> vec;
+            std::vector<AwgFloatArray> vec;
             vec.reserve(futures.size());
-            for(std::future<AwgDoubleArray>& f : futures)
+            for(std::future<AwgFloatArray>& f : futures)
             {
                 vec.push_back(f.get());
             }
-            AwgDoubleArray result = AwgDoubleArray::combine(vec);
+            AwgFloatArray result = AwgFloatArray::combine(vec);
             return result;
         }
     }
 
-    return AwgDoubleArray{};
+    return AwgFloatArray{};
 }
 
-AwgDoubleArray Awg::processBinFile(QFile *file, std::size_t mapStart, std::size_t mapSize)
+AwgFloatArray Awg::processBinFile(QFile *file, std::size_t mapStart, std::size_t mapSize)
 {
     FileMutex.lock();
     unsigned char* buf = file->map(mapStart,mapSize);
@@ -290,12 +290,12 @@ AwgDoubleArray Awg::processBinFile(QFile *file, std::size_t mapStart, std::size_
     if(buf == nullptr)
     {
         emit AWGSIG->sigWarningMessage(QCoreApplication::translate("Awg","文件%1映射失败,在分块%2").arg(file->fileName()).arg(mapStart));
-        return AwgDoubleArray{};
+        return AwgFloatArray{};
     }
 
-    //直接将映射的内存拷贝到目标数组中,这里的mapSize是经过Awg::cutBinaryFile处理的,所以一定能整除sizeof (double)
-    const std::size_t arrayLeng = mapSize/sizeof (double);
-    AwgDoubleArray array(arrayLeng);
+    //直接将映射的内存拷贝到目标数组中,这里的mapSize是经过Awg::cutBinaryFile处理的,所以一定能整除sizeof (float)
+    const std::size_t arrayLeng = mapSize/sizeof (float);
+    AwgFloatArray array(arrayLeng);
     memcpy(array,buf,mapSize);
     emit AWGSIG->sigFileProcess(mapSize);
 
@@ -309,7 +309,7 @@ AwgDoubleArray Awg::processBinFile(QFile *file, std::size_t mapStart, std::size_
     return array;
 }
 
-AwgDoubleArray Awg::processTextFile(QFile *file, std::size_t mapStart, std::size_t mapSize, const std::vector<char> &spliters)
+AwgFloatArray Awg::processTextFile(QFile *file, std::size_t mapStart, std::size_t mapSize, const std::vector<char> &spliters)
 {
     FileMutex.lock();
     unsigned char* buf = file->map(mapStart,mapSize);
@@ -318,7 +318,7 @@ AwgDoubleArray Awg::processTextFile(QFile *file, std::size_t mapStart, std::size
     if(buf == nullptr)
     {
         emit AWGSIG->sigWarningMessage(QCoreApplication::translate("Awg","文件%1映射失败,在分块%2").arg(file->fileName()).arg(mapStart));
-        return AwgDoubleArray{};
+        return AwgFloatArray{};
     }
 
     const char* start = reinterpret_cast<const char*>(buf);
@@ -341,7 +341,7 @@ AwgDoubleArray Awg::processTextFile(QFile *file, std::size_t mapStart, std::size
         if( (*(end-1)) == spliters[i] )
             --arraySize;
     }
-    AwgDoubleArray array(arraySize);
+    AwgFloatArray array(arraySize);
 
     while (start < end)
     {
@@ -366,9 +366,9 @@ AwgDoubleArray Awg::processTextFile(QFile *file, std::size_t mapStart, std::size
         {
             // 根据值的大小决定使用最大值还是最小值
             if(*start == '-')
-                array[index] = -std::numeric_limits<double>::max();
+                array[index] = -std::numeric_limits<float>::min();
             else
-                array[index] = std::numeric_limits<double>::max();
+                array[index] = std::numeric_limits<float>::max();
             ++index;
         }
 //        else

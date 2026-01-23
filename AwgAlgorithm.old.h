@@ -1,12 +1,12 @@
-﻿#ifndef AWGALGORITHM_H
-#define AWGALGORITHM_H
+﻿#ifndef AWGALGORITHMOLD_H
+#define AWGALGORITHMOLD_H
 
 #ifndef AWGARRAY_H
 #include "AwgArray.hpp"
 #endif
 
 class QFile;
-namespace Awg {
+namespace AwgOld {
     ///函数后缀Avx2表示这个函数内部使用了Avx2指令进行硬件计算加速,后缀MT表示函数内部使用了多线程进行软件计算加速,Fast表示同时使用进行了软件和硬件加速
 
     ///2025.12.1更新:所有带后缀的函数都移动到cpp文件中,函数在编译器允许的条件下始终会使用更快的算法,对于函数调用者来说不需要再自行区分需要调用哪种算法
@@ -96,4 +96,4 @@ namespace Awg {
 
 }
 
-#endif // AWGALGORITHM_H
+#endif // AWGALGORITHMOLD_H
