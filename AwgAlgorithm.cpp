@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <random>
+#include "UtilitySubSystem/xsimd/xsimd.hpp"
 
 //Avx版本的sin计算函数,非原创,缺点是我看不懂
 namespace AvxSin {
@@ -92,73 +93,6 @@ namespace AvxSin {
         s_result = _mm256_blendv_pd(s_result, vx, tiny_mask);
         s_result = _mm256_blendv_pd(s_result, VEC_NAN, special_mask);
         return s_result;
-    }
-
-    __inline __m256d __attribute__((__gnu_inline__, __always_inline__, __artificial__))
-    mm256_abs_pd(__m256d x) {
-        const __m256d sign_mask = _mm256_set1_pd(-0.0); // -0.0 = 0x8000000000000000
-        return _mm256_andnot_pd(sign_mask, x);
-    }
-
-    // 辅助函数：将 x 包装到 [-π, π] 区间
-    __inline __m256d __attribute__((__gnu_inline__, __always_inline__, __artificial__))
-    mm256_reduce_to_pi(__m256d x) {
-        const __m256d inv_two_pi = _mm256_set1_pd(0.5 * M_1_PI);
-        const __m256d two_pi = _mm256_set1_pd(2.0 * M_PI);
-
-        // n = round(x / (2π))
-        __m256d n = _mm256_round_pd(_mm256_mul_pd(x, inv_two_pi), _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
-
-        // x = x - n * 2π
-        return _mm256_fnmadd_pd(n, two_pi, x);
-    }
-
-    //这个函数来自于deepseek,这个函数效率尚可,但是精度欠佳某些角度范围内只有小数点后四位的精度准确
-    __inline __m256d __attribute__((__gnu_inline__, __always_inline__, __artificial__))
-    sinAvx2(__m256d x)
-    {
-        static constexpr double denpow1 = double(1) / 1;
-        static constexpr double denpow3 = double(-1) / 6;
-        static constexpr double denpow5 = double(1) / 120;
-        static constexpr double denpow7 = double(-1) / 5040;
-        static constexpr double denpow9 = double(1) / 362800;
-        static constexpr double denpow11 = double(-1) / 39916800;
-        static constexpr double denpow13 = double(1) / double(6227020800);
-        static constexpr double denpow15 = double(-1) / double(1307674368000);
-
-        x = mm256_reduce_to_pi(x);
-
-        // 对于小角度，使用泰勒展开更精确
-        const __m256d small_threshold = _mm256_set1_pd(1e-4);
-        __m256d mask_small = _mm256_cmp_pd(mm256_abs_pd(x), small_threshold, _CMP_LT_OQ);
-
-        // 小角度近似：sin(x) ≈ x - x^3/6
-        __m256d x_sq = _mm256_mul_pd(x, x);
-        __m256d small_result = _mm256_mul_pd(x,
-                                             _mm256_fnmadd_pd(_mm256_set1_pd(1.0/6.0), x_sq, _mm256_set1_pd(1.0)));
-
-        // 对于较大角度，使用 7 阶多项式近似
-        // 系数来自 minimax 近似，在 [-π, π] 区间上误差 < 1e-7
-        const __m256d c1 = _mm256_set1_pd(denpow1);
-        const __m256d c3 = _mm256_set1_pd(denpow3);
-        const __m256d c5 = _mm256_set1_pd(denpow5);
-        const __m256d c7 = _mm256_set1_pd(denpow7);
-        const __m256d c9 = _mm256_set1_pd(denpow9);
-        const __m256d c11 = _mm256_set1_pd(denpow11);
-        const __m256d c13 = _mm256_set1_pd(denpow13);
-
-        // 使用霍纳法则计算多项式：x + x^3*c3 + x^5*c5 + ...
-        __m256d x2 = _mm256_mul_pd(x, x);
-        __m256d result = _mm256_fmadd_pd(x2, c13, c11);
-        result = _mm256_fmadd_pd(x2, result, c9);
-        result = _mm256_fmadd_pd(x2, result, c7);
-        result = _mm256_fmadd_pd(x2, result, c5);
-        result = _mm256_fmadd_pd(x2, result, c3);
-        result = _mm256_fmadd_pd(x2, result, c1);
-        result = _mm256_mul_pd(x, result);
-
-        // 合并结果：小角度使用泰勒展开，大角度使用多项式
-        return _mm256_blendv_pd(result, small_result, mask_small);
     }
 }
 
@@ -538,7 +472,7 @@ namespace Awg{
         while (beg < end)
         {
             double rad = 2.0 * Awg::PI * (beg - output) / totalPoints + phaseRad;
-            *beg = Awg::Amplitude * std::sin(rad);
+            *beg = Awg::Amplitude * (std::sin(rad)+1)/2;
             ++beg;
         }
     }
@@ -559,9 +493,11 @@ namespace Awg{
             retVec = _mm256_mul_pd(indexVc,piMul2);
             retVec = _mm256_div_pd(retVec,totalPointsVec);
             retVec = _mm256_add_pd(retVec,phaseRadVec);
-            retVec = AvxSin::sinAvx2HighPrecision(retVec);
+            //retVec = AvxSin::sinAvx2HighPrecision(retVec);
             //-o0优化下xsimd::sin的效率显著低于AvxSin::sinAvx2HighPrecision,但是在-o2优化下又于AvxSin::sinAvx2HighPrecision
-            //retVec = xsimd::sin(xsimd::batch<double,xsimd::avx>(retVec));//这里直接指定axv2反而会导致段错误,很奇怪。
+            retVec = xsimd::sin(xsimd::batch<double,xsimd::avx>(retVec));//这里-o0优化并且直接指定axv2反而会导致段错误,很奇怪。
+            retVec = _mm256_add_pd(retVec,_mm256_set1_pd(1.0));
+            retVec = _mm256_div_pd(retVec,_mm256_set1_pd(2.0));
             retVec = _mm256_mul_pd(retVec,amplVec);
             _mm256_storeu_pd(beg,retVec);
 
@@ -792,6 +728,7 @@ namespace Awg{
             return buf;
         }
     }
+
 }
 
 bool Awg::isFloatBegin(char c) noexcept
@@ -875,6 +812,40 @@ const char* Awg::findCharMT(const char *beg, const char *end, char target) noexc
         return nullptr;
     else
         return *std::min_element(rets.begin(),rets.end());
+}
+
+void Awg::reverse(char *beg, char *end)
+{
+    //反向原理:先提取数据范围开头的N字节数据和末尾N字节数据,然后对提取的两块数据分别做反向处理,随后再交换他们在原数组中的位置
+    //例如原始数组为:[1,2,3,4,5,6,7,8,9],每次交换两字节数据:
+    //提取开头末尾两字节数据:[1,2][3,4,5,6,7][8,9]
+    //交换提取的两字节数据位置:[2,1][3,4,5,6,7][9,8]
+    //交换他们在原始数组中的位置:[9,8][3,4,5,6,7][2,1]
+    //再提取范围内的开头末尾两字节数据:[9,8][3,4][5][6,7][2,1]
+    //交换这两组数据的顺序:[9,8][4,3][5][7,6][2,1]
+    //交换这两组数据在数组中的位置:[9,8][7,6][5][4,3][2,1]
+    //整个数组处理完毕:[9,8,7,6,5,4,3,2,1]
+    int stepLength = 32;
+    while (beg + stepLength*2 <= end)
+    {
+        __m256i mask = _mm256_set_epi8(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,
+                                       0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15);
+        //分别取出数组开头和末尾的32字节数据
+        __m256i headChunk = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(beg));
+        __m256i tailChunk = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(end - stepLength));
+        //然后将这两块数据反向
+        headChunk = _mm256_shuffle_epi8(headChunk,mask);
+        headChunk = _mm256_permute2x128_si256(headChunk, headChunk, 0x01);
+        tailChunk = _mm256_shuffle_epi8(tailChunk,mask);
+        tailChunk = _mm256_permute2x128_si256(tailChunk, tailChunk, 0x01);
+        //反向完成之后写入原始数组:交换头尾32字节数据,开头的数据写入到末尾,末尾的数据写入到开头
+        _mm256_storeu_si256(reinterpret_cast<__m256i*>(beg),tailChunk);
+        _mm256_storeu_si256(reinterpret_cast<__m256i*>(end-stepLength),headChunk);
+        //缩小数据范围
+        beg += stepLength;
+        end -= stepLength;
+    }
+    std::reverse(beg,end);
 }
 
 const short *Awg::min(const short *begin, const short *end)
@@ -1271,7 +1242,7 @@ AwgDoubleArray Awg::generateSin(double sampleRate, double frequency, double phas
         double* output = waveform.data();
         double* beg = output + index;
         double* end = beg + chunks[i];
-#ifdef __AVX2__
+#if __AVX2__
         pool->run<ThreadPool::Ordered>(Awg::outputSinAvx2,totalPoints,phaseRad,output,beg,end);
 #else
         pool->run<ThreadPool::Ordered>(Awg::outputSinScalar,totalPoints,phaseRad,output,beg,end);

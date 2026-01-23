@@ -30,6 +30,9 @@ namespace Awg {
     const char* findChar(const char* beg,const char* end, char target) noexcept;
     const char* findCharMT(const char* beg,const char* end, char target) noexcept;
 
+    ///将给定的char数组按字节反序
+    void reverse(char* beg,char* end);
+
     /// 从给定short数组中查找最小值并返回第一个最小值指针,在极端情况下(数组已经按从大到小排序)这个函数的效率可能会略低于std::min_element
     const short* min(const short* beg,const short* end);
 
