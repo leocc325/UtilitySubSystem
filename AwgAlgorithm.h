@@ -74,7 +74,7 @@ namespace Awg
     AwgFloatArray generateNoise(float sampleRate,float bandWidth);
 
     template<typename T>
-    const T* min(const T* beg,const T* end)
+    inline const T* min(const T* beg,const T* end)
     {
 #ifdef __AVX2__
         using Reg = xsimd::batch<T,xsimd::avx>;
@@ -114,7 +114,7 @@ namespace Awg
 
 
     template<typename T>
-    const T* minParallel(const T* beg,const T* end)
+    inline const T* minParallel(const T* beg,const T* end)
     {
         std::size_t dataLen = end - beg + 1;
         std::vector<std::size_t> threadChunks = Awg::splitLengthAligned(dataLen,Awg::MinArrayLength,Awg::ArrayAlignment/sizeof (T));
@@ -140,7 +140,7 @@ namespace Awg
     }
 
     template<typename T>
-    const T* max(const T* beg,const T* end)
+    inline const T* max(const T* beg,const T* end)
     {
 #ifdef __AVX2__
         using Reg = xsimd::batch<T,xsimd::avx>;
@@ -180,7 +180,7 @@ namespace Awg
 
 
     template<typename T>
-    const T* maxParallel(const T* beg,const T* end)
+    inline const T* maxParallel(const T* beg,const T* end)
     {
         std::size_t dataLen = end - beg + 1;
         std::vector<std::size_t> threadChunks = Awg::splitLengthAligned(dataLen,Awg::MinArrayLength,Awg::ArrayAlignment/sizeof (T));
@@ -206,7 +206,7 @@ namespace Awg
     }
 
     template<typename T>
-    std::pair<const T*,const T*> minmax(const T* beg,const T* end)
+    inline std::pair<const T*,const T*> minmax(const T* beg,const T* end)
     {
 #ifdef __AVX2__
         using Reg = xsimd::batch<T,xsimd::avx>;
@@ -256,7 +256,7 @@ namespace Awg
     }
 
     template<typename T>
-    std::pair<const T*,const T*> minmaxParallel(const T* beg,const T* end)
+    inline std::pair<const T*,const T*> minmaxParallel(const T* beg,const T* end)
     {
         std::size_t dataLen = end - beg + 1;
         std::vector<std::size_t> threadChunks = Awg::splitLengthAligned(dataLen,Awg::MinArrayLength,Awg::ArrayAlignment/sizeof (T));
@@ -284,7 +284,7 @@ namespace Awg
 
     ///数据点超过最大像素点之后按包络生成数据的略缩图
     template<typename T>
-    AlignedSharedArray<T,Awg::ArrayAlignment> generateOverview(const T* data,const std::size_t length)
+    inline AlignedSharedArray<T,Awg::ArrayAlignment> generateOverview(const T* data,const std::size_t length)
     {
         if(length <= Awg::MaxPlotPoints)
         {
@@ -343,7 +343,7 @@ namespace Awg
 
     ///数据点超过最大像素点之后按包络生成数据的略缩图(多线程版本)
     template<typename T>
-    AlignedSharedArray<T,Awg::ArrayAlignment> generateOverviewParallel(const T* data,const std::size_t length)
+    inline AlignedSharedArray<T,Awg::ArrayAlignment> generateOverviewParallel(const T* data,const std::size_t length)
     {
         if(length <= Awg::MaxPlotPoints)
         {
@@ -413,7 +413,7 @@ namespace Awg
 
     ///数组类型转换的标量版本,当输入输出数组类型From和To所占字节数长度不一致时会使用这个版本
     template<typename From,typename To>
-    typename std::enable_if<sizeof(From) != sizeof(To)>::type
+    inline typename std::enable_if<sizeof(From) != sizeof(To)>::type
     arrayCastImpl(To* output,const From* beg,const From* end)
     {
         constexpr To MAX = std::numeric_limits<To>::max();
@@ -429,7 +429,7 @@ namespace Awg
     ///数组类型转换的标量版本,当输入输出数组类型From和To所占字节数长度一致时会使用这个版本,这是硬件加速版本,效率更高
     ///如果From和To类型长度不一致又需要硬件加速则需要手动实现
     template<typename From,typename To>
-    typename std::enable_if<sizeof(From) == sizeof(To)>::type
+    inline typename std::enable_if<sizeof(From) == sizeof(To)>::type
     arrayCastImpl(To* output,const From* beg,const From* end)
     {
         using BatchFrom = xsimd::batch<From>;
@@ -448,14 +448,54 @@ namespace Awg
         arrayCastScalar(output,beg,end);
     }
 
-    // void arrayCastImpl(short* output,const float* beg,const float* end)
-    // {
+    inline void arrayCastImpl(short* output,const float* beg,const float* end)
+    {
+        const int chunk = Awg::ArrayAlignment / sizeof (float);
+        const __m256 short_max = _mm256_set1_ps(32767.0);
+        const __m256 short_min = _mm256_set1_ps(-32768.0);
+        while (beg + chunk*2 <= end)
+        {
+            // 加载两个 float 向量
+            __m256 val1 = _mm256_loadu_ps(beg);              // 前 8 个 float
+            __m256 val2 = _mm256_loadu_ps(beg + chunk);  // 后 8 个 float
 
-    // }
+            // 四舍五入（使用最近舍入）
+            __m256 rounded1 = _mm256_round_ps(val1, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
+            __m256 rounded2 = _mm256_round_ps(val2, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
+
+            // 饱和处理：限制在 [-32768.0, 32767.0] 范围内
+            rounded1 = _mm256_min_ps(_mm256_max_ps(rounded1, short_min), short_max);
+            rounded2 = _mm256_min_ps(_mm256_max_ps(rounded2, short_min), short_max);
+
+            // 转换为 int32_t
+            __m256i int32_1 = _mm256_cvtps_epi32(rounded1);
+            __m256i int32_2 = _mm256_cvtps_epi32(rounded2);
+
+            __m256i packed = _mm256_packs_epi32(int32_1, int32_2);
+
+            packed = _mm256_permute4x64_epi64(packed, 0b11011000);  // 0xD8
+
+            // 存储结果
+            _mm256_storeu_si256(reinterpret_cast<__m256i*>(output), packed);
+
+            // 更新指针
+            beg += chunk*2;// 处理了 16 个 float
+            output += chunk*2; // 产生了 16 个 short
+        }
+
+        constexpr short MAX = std::numeric_limits<short>::max();
+        constexpr short MIN = std::numeric_limits<short>::min();
+        while (beg < end)
+        {
+            *output = std::min(std::max( short(std::round(*beg)), MIN), MAX);
+            ++output;
+            ++beg;
+        }
+    }
 
     ///数组数据类型转换
     template<typename From,typename To>
-    AlignedSharedArray<To,Awg::ArrayAlignment> arrayCast(const AlignedSharedArray<From,Awg::ArrayAlignment>& array)
+    inline AlignedSharedArray<To,Awg::ArrayAlignment> arrayCast(const AlignedSharedArray<From,Awg::ArrayAlignment>& array)
     {
         AlignedSharedArray<To,Awg::ArrayAlignment> output(array.size());
         if(output == nullptr)
@@ -475,10 +515,7 @@ namespace Awg
         }
         pool->waitforDone();
         return output;
-
     }
-
-    void test();
 }
 
 #endif // AWGALGORITHM_H

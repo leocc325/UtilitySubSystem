@@ -80,7 +80,7 @@ namespace Awg
     }
 #endif
 
-    void compressShort12BitScalar(bool bigEndian,const short *begin, const short *end, char *output)
+    void compressShort12BitScalar(const short *begin, const short *end, char *output)
     {
         //每2个short最终占用3字节内存
         unsigned short first = 0,second = 0;
@@ -88,18 +88,10 @@ namespace Awg
         {
             first = begin[0] & 0xFFF;
             second = begin[1] & 0xFFF;
-            if(bigEndian)
-            {
-                output[0] = static_cast<char>(first >> 4);
-                output[1] = static_cast<char>((first & 0xF) << 4) |  static_cast<char>(second >> 8);
-                output[2] = static_cast<char>(second & 0xFF);
-            }
-            else
-            {
-                output[0] = static_cast<char>(((second & 0xF) << 4) | ((first >> 8) & 0xF));
-                output[1] = static_cast<char>(first & 0xFF);
-                output[2] = static_cast<char>(second >> 4);
-            }
+
+            output[0] = static_cast<char>(first >> 4);
+            output[1] = static_cast<char>((first & 0xF) << 4) |  static_cast<char>(second >> 8);
+            output[2] = static_cast<char>(second & 0xFF);
 
             begin += 2;
             output += 3;
@@ -109,21 +101,13 @@ namespace Awg
         if(begin != end)
         {
             first = (*begin) & 0xFFF;
-            if(bigEndian)
-            {
-                output[0] = static_cast<char>(first >> 4);
-                output[1] = static_cast<char>((first & 0xF) << 4);
-            }
-            else
-            {
-                output[0] = static_cast<char>(first & 0xFF);        // 低8位
-                output[1] = static_cast<char>((first >> 8) & 0xF);  // 高4位在低4位位置
-            }
+            output[0] = static_cast<char>(first >> 4);
+            output[1] = static_cast<char>((first & 0xF) << 4);
         }
     }
 
 #ifdef __AVX2__
-    void compressShort12BitAvx2(bool bigEndian,const short *begin, const short *end, char *output)
+    void compressShort12BitAvx2(const short *begin, const short *end, char *output)
     {
         const std::size_t chunkLeng = Awg::ArrayAlignment / sizeof (short);
         __m256i dataVec = _mm256_setzero_si256();
@@ -134,10 +118,8 @@ namespace Awg
                                                 0,0,0,0xFF,0,0,0,0xFF,0,0,0,0xFF,0,0,0,0xFF);
         const __m256i orShuffle = _mm256_setr_epi8(3,0,1,2,7,4,5,6,11,8,9,10,15,12,13,14,
                                                    3,0,1,2,7,4,5,6,11,8,9,10,15,12,13,14);
-        const __m256i bigEndianMask = _mm256_setr_epi8(1,0,2,5,4,6,9,8,10,13,12,14,3,7,11,15,
-                                                       1,0,2,5,4,6,9,8,10,13,12,14,3,7,11,15);//按大端模式重排字节顺序
-        const __m256i littleEndianMask = _mm256_setr_epi8(0,1,5,2,6,4,8,9,13,10,14,12,7,3,15,11,
-                                                          0,1,5,2,6,4,8,9,13,10,14,12,7,3,15,11);//按小端模式重排字节顺序
+        const __m256i combineMask = _mm256_setr_epi8(1,0,2,5,4,6,9,8,10,13,12,14,3,7,11,15,
+                                                       1,0,2,5,4,6,9,8,10,13,12,14,3,7,11,15);
         __m256i setLow16bitToZero = _mm256_setr_epi64x(0xFFFFFFFFFFFFFFFF,0xFFFFFFFFFFFFFFFF,0xFFFFFFFFFFFFFFFF,0x0000000000000000);
         __m256i permutexMask = _mm256_setr_epi32(0,1,2,4,5,6,3,7);
         while (begin + chunkLeng <= end)
@@ -149,7 +131,7 @@ namespace Awg
             orVec = _mm256_blendv_epi8(orVec,dataVec,orMask);//提取指定位上的8bit数据
             orVec = _mm256_shuffle_epi8(orVec,orShuffle);//洗牌之后需要合并的bit位已经在目标位置上了,直接跟源寄存器做或运算
             dataVec = _mm256_or_si256(dataVec,orVec);//求或运算完成数据拼接
-            dataVec = bigEndian ? _mm256_shuffle_epi8(dataVec,bigEndianMask) : _mm256_shuffle_epi8(dataVec,littleEndianMask);//对拼接好的数据重新排序,可以自行选择大端排序或者小端排序
+            dataVec = _mm256_shuffle_epi8(dataVec,combineMask);//对拼接好的数据重新排序
             dataVec = _mm256_permutevar8x32_epi32(dataVec,permutexMask);//将拼接好的数据放到寄存器前面,无效数据放到寄存器最后
             dataVec = _mm256_and_si256(dataVec,setLow16bitToZero);//将最后8字节清零,因为最后8字节残留了无效的数据,不清零会污染波形数据
             _mm256_storeu_si256(reinterpret_cast<__m256i*>(output),dataVec);
@@ -160,7 +142,7 @@ namespace Awg
         }
 
         //最后处理无法使用AVX指令处理的数据
-        compressShort12BitScalar(bigEndian,begin,end,output);
+        compressShort12BitScalar(begin,end,output);
     }
 #endif
 
@@ -344,27 +326,6 @@ namespace Awg
     }
 #endif
 }
-#include <QDebug>
-    void Awg::test()
-    {
-        short original[20] = {0x123,0x456,0x789,0xabc,0xdef
-            ,0x123,0x456,0x789,0xabc,0xdef
-        ,0x123,0x456,0x789,0xabc,0xdef
-        ,0x123,0x456,0x789,0xabc,0xdef};
-
-        char opt1[30];
-        char opt2[30];
-        char opt3[30];
-        char opt4[30];
-        Awg::compressShort12BitAvx2(true,original,original+20,opt1);
-        Awg::compressShort12BitScalar(true,original,original+20,opt2);
-        Awg::compressShort12BitAvx2(false,original,original+20,opt3);
-        Awg::compressShort12BitScalar(false,original,original+20,opt4);
-        for(int i = 0; i < 30; i++)
-        {
-            qDebug()<<opt1[i]<<opt2[i]<<opt3[i]<<opt4[i];
-        }
-    }
 
 bool Awg::isFloatBegin(char c) noexcept
 {
@@ -486,9 +447,9 @@ void Awg::reverse(char *beg, char *end)
 void Awg::compressShort12Bit(const short *begin, const short *end, char *output)
 {
 #ifdef __AVX2__
-    Awg::compressShort12BitAvx2(true,begin,end,output);
+    Awg::compressShort12BitAvx2(begin,end,output);
 #else
-    Awg::compressShort12BitScalar(true,begin,end,output);
+    Awg::compressShort12BitScalar(begin,end,output);
 #endif
 }
 
