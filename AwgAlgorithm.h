@@ -1,21 +1,10 @@
 #ifndef AWGALGORITHM_H
 #define AWGALGORITHM_H
 
-#ifndef AWGARRAY_H
 #include "AwgArray.hpp"
-#endif
-
-#ifndef XSIMD_HPP
 #include "UtilitySubSystem/xsimd/xsimd.hpp"
-#endif
-
-#ifndef THREADPOOL_H
 #include "UtilitySubSystem/ThreadPool.hpp"
-#endif
-
-#ifndef AWGUTILITY_H
 #include "UtilitySubSystem/AwgUtility.h"
-#endif
 
 class QFile;
 namespace Awg

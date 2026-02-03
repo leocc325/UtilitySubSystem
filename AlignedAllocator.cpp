@@ -1,18 +1,18 @@
 ﻿#include "AlignedAllocator.h"
 #include <stdlib.h>
 
-void *Awg::alignedMalloc(std::size_t alignment, std::size_t bufSize) noexcept
+void *Awg::alignedMalloc(unsigned long long alignment, unsigned long long bufSize) noexcept
 {
     if (alignment == 0 || (alignment & (alignment - 1)) != 0)
         return nullptr;
 
-    std::size_t totalSize = bufSize + alignment + sizeof (void*) - 1;
+    unsigned long long totalSize = bufSize + alignment + sizeof (void*) - 1;
     void* rawPtr = std::malloc(totalSize);
     if(rawPtr == nullptr)
         return nullptr;
 
     uintptr_t rawAddress = reinterpret_cast<uintptr_t>(rawPtr);
-    uintptr_t alignedAddress = (rawAddress + sizeof(void*) + alignment - 1) & ~(alignment - 1);
+    uintptr_t alignedAddress = Awg::alignUp(rawAddress + sizeof(void*),alignment);/*(rawAddress + sizeof(void*) + alignment - 1) & ~(alignment - 1);*/
 
     // 在对齐地址之前存储原始指针
     void** storeRawPtr = reinterpret_cast<void**>(alignedAddress - sizeof(void*));
@@ -30,7 +30,12 @@ void Awg::alignedFree(void *ptr) noexcept
     }
 }
 
-bool Awg::alignedCheck(const void *ptr,const std::size_t alignSize) noexcept
+bool Awg::alignedCheck(const void *ptr,const unsigned long long alignSize) noexcept
 {
     return !(reinterpret_cast<uintptr_t>(ptr) % alignSize);
+}
+
+unsigned long long Awg::alignUp(unsigned long long input, unsigned long long aligned)
+{
+    return (input + aligned - 1) & ~(aligned  - 1);
 }

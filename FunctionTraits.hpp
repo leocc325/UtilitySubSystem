@@ -1,9 +1,7 @@
 ﻿#ifndef FUNCTIONTRAITS_H
 #define FUNCTIONTRAITS_H
 
-#ifndef _GLIBCXX_FUNCTIONAL
 #include <functional>
-#endif
 
 /*https://www.cnblogs.com/yaoyu126/p/12427845.html*/
 

@@ -1,21 +1,10 @@
 ﻿#ifndef AWGARRAY_H
 #define AWGARRAY_H
 
-#ifndef AWGDEFINES_H
 #include "AwgDefines.h"
-#endif
-
-#ifndef _GLIBCXX_VECTOR
 #include <vector>
-#endif
-
-#ifndef _GLIBCXX_MEMORY
 #include <memory>
-#endif
-
-#ifndef ALIGNEDALLOCATOR_H
 #include "UtilitySubSystem/AlignedAllocator.h"
-#endif
 
 ///前置声明
 template<typename T,std::size_t Align>

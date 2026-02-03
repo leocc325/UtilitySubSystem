@@ -1,17 +1,9 @@
 ﻿#ifndef AWGFILEIO_H
 #define AWGFILEIO_H
 
-#ifndef QLIST_H
 #include <QList>
-#endif
-
-#ifndef QSTRING_H
 #include <QString>
-#endif
-
-#ifndef AWGARRAY_H
 #include "AwgArray.hpp"
-#endif
 
 class QFile;
 namespace Awg

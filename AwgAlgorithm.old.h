@@ -1,9 +1,7 @@
 ﻿#ifndef AWGALGORITHMOLD_H
 #define AWGALGORITHMOLD_H
 
-#ifndef AWGARRAY_H
 #include "AwgArray.hpp"
-#endif
 
 class QFile;
 namespace AwgOld {

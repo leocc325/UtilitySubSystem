@@ -1,14 +1,9 @@
 ﻿#ifndef AWGFILEIOPRIVATE_H
 #define AWGFILEIOPRIVATE_H
 
-#ifndef FMT_FORMAT_H_
 #define FMT_HEADER_ONLY
 #include "UtilitySubSystem/fmt/format.h"
-#endif
-
-#ifndef AWGSIGNALS_H
 #include "UtilitySubSystem/AwgSignals.h"
-#endif
 
 namespace Awg {
     //2026.1.15txt和csv的枚举值要和AwgFileIO.h中的枚举值保持一致

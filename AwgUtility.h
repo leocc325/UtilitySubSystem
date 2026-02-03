@@ -1,9 +1,7 @@
 ﻿#ifndef AWGUTILITY_H
 #define AWGUTILITY_H
 
-#ifndef AWGDEFINES_H
 #include "AwgDefines.h"
-#endif
 
 class ThreadPool;
 namespace Awg

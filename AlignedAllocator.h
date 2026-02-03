@@ -10,6 +10,9 @@ namespace Awg {
 
     ///检查指针ptr是否是alignSize字节对齐的地址
     bool alignedCheck(const void* ptr,const unsigned long long alignSize) noexcept;
+
+    ///将输入向上对齐到aligned的N倍,返回对齐之后的值
+    unsigned long long alignUp(unsigned long long input,unsigned long long aligned);
 }
 
 

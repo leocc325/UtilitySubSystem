@@ -1,9 +1,7 @@
 ﻿#ifndef AWGSIGNALS_H
 #define AWGSIGNALS_H
 
-#ifndef QOBJECT_H
 #include <QObject>
-#endif
 
 #define AWGSIG AwgSignals::getInstance()
 

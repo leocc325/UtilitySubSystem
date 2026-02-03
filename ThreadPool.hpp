@@ -1,45 +1,16 @@
 ﻿#ifndef THREADPOOL_H
 #define THREADPOOL_H
 
-#ifndef _GLIBCXX_ATOMIC
 #include <atomic>
-#endif
-
-#ifndef _GLIBCXX_FUNCTIONAL
 #include <functional>
-#endif
-
-#ifndef _GLIBCXX_MUTEX
 #include <mutex>
-#endif
-
-#ifndef _GLIBCXX_THREAD
 #include <thread>
-#endif
-
-#ifndef _GLIBCXX_FUTURE
 #include <future>
-#endif
-
-#ifndef _GLIBCXX_CONDITION_VARIABLE
 #include <condition_variable>
-#endif
-
-#ifndef _GLIBCXX_QUEUE
 #include <queue>
-#endif
-
-#ifndef _GLIBCXX_VECTOR
 #include <vector>
-#endif
-
-#ifndef _GLIBCXX_ALGORITHM
 #include <algorithm>
-#endif
-
-#ifndef FUNCTIONTRAITS_H
 #include "FunctionTraits.hpp"
-#endif
 /**
  * @brief The ThreadQueue class
  */
