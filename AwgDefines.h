@@ -51,24 +51,63 @@ namespace Awg
     ///Mcu上传的数据帧大小
     constexpr unsigned long long McuFrameSize = 8;
 
-    ///根据波形设置频率和fpga存储深度计算时钟频率
-    inline double calculateFpgaClock(const double Fs)
+    ///根据波形设置频率和fpga时钟频率计算实际生成的点数N和每个点的重复次数,适用于软件自身生成的波形
+    inline bool calculateFpgaClock_G(const double Fs,double& Re,double& Fc,double& N)
     {
         ///假如计算出来的点数超过了FGPA能保存的最大点数,就重新调整点数,最后根据调整的点数重新设置FPGA时钟
         ///这里的调整点数的含义是:调整每个点在FPGA中的输出次数
         ///假如FPGA时钟就是1G,FPGA能保存的最大点数为1M,所以满点数的情况下只能输出1KHz信号,假如需要输出100Hz信号,则需要10M个点
         ///等价于:将1M个点每个点重复10次输出,在点数和输出频率不变的情况下,将FPGA时钟调整为100M
-        ///Fc:fpga时钟频率  Fs:用户设置的波形输出频率  P:波形总长度点数
-        ///三者的关系满足:Fs = P * Fc
-        double repeat = 1;//每个点的输出次数
-        double P = Awg::FpgaClockMax / Fs;
-        while( (P / repeat) > Awg::FpgaPointsSize)
+        ///N:波形长度  Fc:Fpga时钟频率 Fs:用户设置的波形输出频率 Re:每一个点重复次数
+        ///Fs = Fc / (Re * N)  =>  Fc = Fs * N * Re
+
+        if(Fs > Awg::FpgaClockMax/2)
+            return false;
+
+        Re = 1;
+        N = Awg::FpgaClockMax / Fs;
+        while( N  > Awg::FpgaPointsSize)
         {
-            ++repeat;
+            Re = Re * 2;//repeat值只能是2的N次幂
+            N = N / 2;
         }
 
-        double Fc = Fs * (P / repeat);
-        return Fc;
+        Fc = Fs * N * Re;
+        return true;
+    }
+
+    ///根据波形设置频率和数据长度计算fpga时钟频率N和每个点的重复次数,适用于从文件加载的波形
+    inline bool calculateFpgaClock_F(const double Fs,const double N,double& Re,double& Fc)
+    {
+        /// N=1Gpts Fs=1Hz > 1*2 > 1*4 > 1*8 > 1*16 === 停止,每个点重复16次将时钟设为16G,此时输出频率为1Hz
+        /// N=3Gpts Fs=0.5Hz > 3*2*0.5 > 3*4*0.5 > 3*8*0.5 === 停止,每个点重复8次将时钟设置为12G,此时输出频率为0.5Hz
+        /// N=2.5Gpts Fs=0.1Hz > 2.5*1*0.1 > 2.5*2*0.1 > 2.5*4*0.1 > 2.5*8*0.1 > 2.5*16*0.1 > 2.5*32*0.1  > 2.5*64*0.1 ===停止,每个点重复64次并且将时钟频率设置为16G,此时输出频率为0.1Hz
+        /// 先调整每个点的重复次数,直到其对应的输出频率落在[20G,10G]区间,然后将这个频率设置为时钟频率即可
+
+        //如果目标频率和点数已经大于fpga时钟最高频率则直接返回false
+        if(Fs* N > Awg::FpgaClockMax)
+            return false;
+
+        Re = 1;
+
+        auto freq = [&]()->double{
+            return N * Fs * Re;
+        };
+
+        //调整重复次数使输出频率能落在10G-20G之间
+        while( freq() < Awg::FpgaClockMax/2)
+        {
+            Re = Re * 2;//repeat值只能是2的N次幂
+        }
+
+        //如果最后一次重复次数增加导致输出频率超出了20G,则说明没有对应的设置能让信号按预定频率输出
+        if(freq() > Awg::FpgaClockMax)
+            return false;
+        else
+        {
+            Fc = freq();
+            return false;
+        }
     }
 
 }

@@ -51,13 +51,13 @@ namespace Awg
     std::vector<std::size_t> splitLengthAligned(std::size_t length,std::size_t minChunk,std::size_t aligned) noexcept;
 
     ///生成正弦波波形
-    AwgFloatArray generateSin(float sampleRate,float frequency,float phase);
+    AwgFloatArray generateSin(std::size_t length,float phase);
 
     ///生成方波波形
-    AwgFloatArray generateSquare(float sampleRate,float frequency,float duty);
+    AwgFloatArray generateSquare(std::size_t length,float duty);
 
     ///生成三角波形
-    AwgFloatArray generateTriangle(float sampleRate,float frequency,float symmetry);
+    AwgFloatArray generateTriangle(std::size_t length,float symmetry);
 
     ///生成噪声波形
     AwgFloatArray generateNoise(float sampleRate,float bandWidth);

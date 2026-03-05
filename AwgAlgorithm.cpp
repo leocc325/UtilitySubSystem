@@ -657,20 +657,19 @@ std::vector<std::size_t> Awg::splitLengthAligned(std::size_t length,std::size_t 
     return vec;
 }
 
-AwgFloatArray Awg::generateSin(float sampleRate, float frequency, float phase)
+AwgFloatArray Awg::generateSin(std::size_t length, float phase)
 {
     // 计算一个完整周期内的采样点数
-    const std::size_t totalPoints = std::round(sampleRate / frequency);
     const float phaseRad = phase * Awg::PI / 180.0;
 
-    if (totalPoints == 0)
+    if (length == 0)
     {
         std::cerr << "Error: sampleRate must be greater than frequency" << std::endl;
         return AwgFloatArray{};
     }
 
     // 分配内存存储波形数据
-    AwgFloatArray waveform(totalPoints);
+    AwgFloatArray waveform(length);
 
     if (waveform == nullptr)
     {
@@ -680,7 +679,7 @@ AwgFloatArray Awg::generateSin(float sampleRate, float frequency, float phase)
 
     //每一个线程处理的点数为总点数/线程数再向上取整
     std::size_t index = 0;
-    std::vector<std::size_t> chunks = Awg::splitLengthAligned(totalPoints,Awg::MinArrayLength,Awg::ArrayAlignment/sizeof(double));
+    std::vector<std::size_t> chunks = Awg::splitLengthAligned(length,Awg::MinArrayLength,Awg::ArrayAlignment/sizeof(double));
     ThreadPool* pool = Awg::globalThreadPool();
     for(std::size_t i = 0; i < chunks.size(); i++)
     {
@@ -688,9 +687,9 @@ AwgFloatArray Awg::generateSin(float sampleRate, float frequency, float phase)
         float* beg = output + index;
         float* end = beg + chunks[i];
 #if __AVX2__
-        pool->run<ThreadPool::Ordered>(Awg::outputSinAvx2,totalPoints,phaseRad,output,beg,end);
+        pool->run<ThreadPool::Ordered>(Awg::outputSinAvx2,length,phaseRad,output,beg,end);
 #else
-        pool->run<ThreadPool::Ordered>(Awg::outputSinScalar,totalPoints,phaseRad,output,beg,end);
+        pool->run<ThreadPool::Ordered>(Awg::outputSinScalar,length,phaseRad,output,beg,end);
 #endif
         index += chunks[i];
     }
@@ -699,27 +698,25 @@ AwgFloatArray Awg::generateSin(float sampleRate, float frequency, float phase)
     return waveform;
 }
 
-AwgFloatArray Awg::generateSquare(float sampleRate, float frequency, float duty)
+AwgFloatArray Awg::generateSquare(std::size_t length, float duty)
 {
     //每个周期最少100个点,这样可以将占空比的精度控制到1%
-    const unsigned minPointsPerPeriod = 100;
-    const std::size_t totalPoints = std::round(sampleRate / frequency);
-    if(totalPoints < minPointsPerPeriod)
+    if(length < 100)
         return AwgFloatArray{};
 
     // 分配内存存储波形数据
-    AwgFloatArray waveform(totalPoints);
+    AwgFloatArray waveform(length);
 
     //将占空比限制到0和1之间
     duty = std::max(duty,0.0f);
     duty = std::min(duty,1.0f);
-    std::size_t edgeIndex = std::round(totalPoints * duty);
+    std::size_t edgeIndex = std::round(length * duty);
     float* output = waveform.data();
     float* edge = output + edgeIndex;
 
     //每一个线程处理的点数为总点数/线程数再向上取整
     std::size_t index = 0;
-    std::vector<std::size_t> chunks = Awg::splitLengthAligned(totalPoints,Awg::MinArrayLength,Awg::ArrayAlignment/sizeof(double));
+    std::vector<std::size_t> chunks = Awg::splitLengthAligned(length,Awg::MinArrayLength,Awg::ArrayAlignment/sizeof(double));
     ThreadPool* pool = Awg::globalThreadPool();
     for(std::size_t i = 0; i < chunks.size(); i++)
     {
@@ -737,16 +734,14 @@ AwgFloatArray Awg::generateSquare(float sampleRate, float frequency, float duty)
     return waveform;
 }
 
-AwgFloatArray Awg::generateTriangle(float sampleRate, float frequency, float symmetry)
+AwgFloatArray Awg::generateTriangle(std::size_t length, float symmetry)
 {
     //每个周期最少100个点,这样可以将对称性的精度控制到1%
-    const unsigned minPointsPerPeriod = 100;
-    const std::size_t totalPoints = std::round(sampleRate / frequency);
-    if(totalPoints < minPointsPerPeriod)
+    if(length < 100)
         return AwgFloatArray{};
 
     // 分配内存存储波形数据
-    AwgFloatArray waveform(totalPoints);
+    AwgFloatArray waveform(length);
 
     //将占空比限制到0和1之间
     symmetry = std::max(symmetry,0.0f);
@@ -757,26 +752,26 @@ AwgFloatArray Awg::generateTriangle(float sampleRate, float frequency, float sym
         float x = 0;
         float y = 0;
     };
-    std::size_t peakIndex = std::round(totalPoints * symmetry);
+    std::size_t peakIndex = std::round(length * symmetry);
 
     //这里需要处理对称性为0或者1的情况
     float raiseK = 1 ,raiseB = 0,fallK = 1,fallB = 0;
 
     if(symmetry == 0)
     {
-        fallK = float(0 - Awg::Amplitude) / (totalPoints - 0);
+        fallK = float(0 - Awg::Amplitude) / (length - 0);
         fallB = Awg::Amplitude;
     }
     else if (symmetry == 1)
     {
-        raiseK = float(Awg::Amplitude - 0) / (totalPoints - 0);
+        raiseK = float(Awg::Amplitude - 0) / (length - 0);
         raiseB = 0;
     }
     else
     {
         raiseK =float(Awg::Amplitude - 0)/ (peakIndex - 0);
         raiseB = Awg::Amplitude - raiseK * peakIndex;
-        fallK = float(0 - Awg::Amplitude) / (totalPoints - peakIndex);
+        fallK = float(0 - Awg::Amplitude) / (length - peakIndex);
         fallB =  Awg::Amplitude - fallK*peakIndex;
     }
     float* output = waveform.data();
@@ -784,7 +779,7 @@ AwgFloatArray Awg::generateTriangle(float sampleRate, float frequency, float sym
 
     //每一个线程处理的点数为总点数/线程数再向上取整
     std::size_t index = 0;
-    std::vector<std::size_t> chunks = Awg::splitLengthAligned(totalPoints,Awg::MinArrayLength,Awg::ArrayAlignment/sizeof(double));
+    std::vector<std::size_t> chunks = Awg::splitLengthAligned(length,Awg::MinArrayLength,Awg::ArrayAlignment/sizeof(double));
     ThreadPool* pool = Awg::globalThreadPool();
     for(std::size_t i = 0; i < chunks.size(); i++)
     {
