@@ -63,6 +63,9 @@ namespace Awg
     AwgFloatArray processBinFile(QFile *file, std::size_t mapStart, std::size_t mapSize);
 
     AwgFloatArray processTextFile(QFile *file, std::size_t mapStart, std::size_t mapSize,const std::vector<char>& spliters);
+
+    ///文件加载完毕之后可以调用这个函数获取最近一次从文件中加载的数据最大值和最小值,这个函数以及对应数据是线程安全的
+    std::pair<const float, const float> getMinMaxRecords();
 }
 
 #endif // AWGFILEIO_H

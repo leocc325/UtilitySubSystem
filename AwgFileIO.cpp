@@ -10,6 +10,15 @@
 
 std::mutex FileMutex;
 
+static float recordMax = 0;
+static float recordMin = 0;
+
+void resetMinMax()
+{
+    recordMax = std::numeric_limits<float>::min();
+    recordMin = std::numeric_limits<float>::max();
+}
+
 template<Awg::FileFormat FT>
 void storeTextFile(const QString &path, const Awg::DT *array, const std::size_t arrayLength)
 {
@@ -136,6 +145,8 @@ AwgFloatArray Awg::loadBinFile(const QString &path)
 
     if(file.open(QIODevice::ReadOnly))
     {
+        resetMinMax();
+
         ThreadPool* pool = Awg::globalThreadPool();
 
         std::vector<std::size_t> chunkSizes = Awg::cutBinaryFile(file.size(),Awg::MinFileChunk,sizeof (double));
@@ -187,6 +198,8 @@ AwgFloatArray Awg::loadCsvFile(const QString &path)
 
     if(file.open(QIODevice::ReadOnly))
     {
+        resetMinMax();
+
         ThreadPool* pool = Awg::globalThreadPool();
         const std::vector<char> spliters{'\n',','};
 
@@ -240,6 +253,8 @@ AwgFloatArray Awg::loadTxtFile(const QString &path)
 
     if(file.open(QIODevice::ReadOnly))
     {
+        resetMinMax();
+
         ThreadPool* pool = Awg::globalThreadPool();
         const std::vector<char> spliters{'\n'};
 
@@ -299,11 +314,16 @@ AwgFloatArray Awg::processBinFile(QFile *file, std::size_t mapStart, std::size_t
     memcpy(array,buf,mapSize);
     emit AWGSIG->sigFileProcess(mapSize);
 
+    //遍历数组获取最大最小值,如果不需要获取最大最小值可以将相关代码屏蔽获取性能上的提升
+    auto pair = Awg::minmax(array.data(),array.data()+array.size());
+
     FileMutex.lock();
     while (!file->unmap(buf))
     {
         emit AWGSIG->sigWarningMessage(QCoreApplication::translate("Awg","文件%1映射解除失败,在分块%2").arg(file->fileName()).arg(mapStart));
     }
+    recordMin = std::min(recordMin,*pair.first);
+    recordMax = std::max(recordMax,*pair.second);
     FileMutex.unlock();
 
     return array;
@@ -343,6 +363,9 @@ AwgFloatArray Awg::processTextFile(QFile *file, std::size_t mapStart, std::size_
     }
     AwgFloatArray array(arraySize);
 
+    float maxValue = std::numeric_limits<float>::min();
+    float minValue = std::numeric_limits<float>::max();
+
     while (start < end)
     {
         //这里手动跳过非数字字符,虽然from_chars也可以自动跳过,但是影响效率
@@ -355,6 +378,8 @@ AwgFloatArray Awg::processTextFile(QFile *file, std::size_t mapStart, std::size_
         auto ret = fast_float::from_chars(start, end, array[index]);
         if(ret.ec == std::errc())
         {
+            maxValue = std::max(array[index],maxValue);
+            minValue = std::min(array[index],minValue);
             ++index;
         }
         //出现错误时不打印信息,跳过即可,当错误信息较多时会严重影响读取效率
@@ -369,6 +394,8 @@ AwgFloatArray Awg::processTextFile(QFile *file, std::size_t mapStart, std::size_
                 array[index] = -std::numeric_limits<float>::min();
             else
                 array[index] = std::numeric_limits<float>::max();
+            maxValue = std::max(array[index],maxValue);
+            minValue = std::min(array[index],minValue);
             ++index;
         }
 //        else
@@ -390,7 +417,15 @@ AwgFloatArray Awg::processTextFile(QFile *file, std::size_t mapStart, std::size_
     {
         emit AWGSIG->sigWarningMessage(QCoreApplication::translate("Awg","文件%1映射解除失败,在分块%2").arg(file->fileName()).arg(mapStart));
     }
+    recordMin = std::min(recordMin,minValue);
+    recordMax = std::max(recordMax,maxValue);
     FileMutex.unlock();
 
     return array;
+}
+
+std::pair<const float,const float> Awg::getMinMaxRecords()
+{
+    std::lock_guard<std::mutex> lock(FileMutex);
+    return std::make_pair(recordMin,recordMax);
 }
