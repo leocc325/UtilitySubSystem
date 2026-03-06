@@ -106,7 +106,7 @@ namespace Awg
         else
         {
             Fc = freq();
-            return false;
+            return true;
         }
     }
 
