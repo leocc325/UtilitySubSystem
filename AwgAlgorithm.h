@@ -25,8 +25,24 @@ namespace Awg
     const char* findChar(const char* beg,const char* end, char target) noexcept;
     const char* findCharParallel(const char* beg,const char* end, char target) noexcept;
 
-    ///将给定的char数组按字节反序
+    ///将给定的数组按反序
     void reverse(char* beg,char* end);
+    void reverse(short* beg,short* end);
+    void reverse(float* beg,float* end);
+    template<typename T>
+    void reverseParallel(T* beg,T* end);//函数定义在后面
+
+    ///交换数组[leftBeg,leftEnd)和[rightBeg,rightEnd)的位置,这两部分数据长度必须相等
+    void exchange(short* leftBeg,short* leftEnd,short* rightBeg,short* rightEnd);
+    void exchange(float* leftBeg,float* leftEnd,float* rightBeg,float* rightEnd);
+    template<typename T>
+    void exchangeParallel(T* leftBeg,T* leftEnd,T* rightBeg,T* rightEnd);//函数定义在后面
+
+    ///将范围[first,last)中的元素重新排列,使得第n个元素成为新的第一个元素,原来的第一个元素则移动到第n+1个位置
+    template<typename T>
+    void rotate(T* first,T* mid,T* last);
+    template<typename T>
+    void rotateParallel(T* first,T* mid,T* last);//函数定义在后面
 
     ///将short数组中的每一个值取12bit压缩写入到二进制内存中,返回写入的长度,需要保证output长度足够写入全部数据,否则会导致程序崩溃
     void compressShort12Bit(const short* beg,const short* end,char* output);//1024bit,前768bit存放，后256比特不适用
@@ -50,14 +66,17 @@ namespace Awg
     ///根据线程池线程数将一个长度为length块切割成若干个大小至少为minChun而且为aligned整倍数的小数组,返回这些数组的长度
     std::vector<std::size_t> splitLengthAligned(std::size_t length,std::size_t minChunk,std::size_t aligned) noexcept;
 
+    ///将输入相位[单位°]映射到[0~360区间]并返回对应的百分比值
+    double phaseToPercent(double phase);
+
     ///生成正弦波波形
-    AwgFloatArray generateSin(std::size_t length,float phase);
+    AwgFloatArray generateSin(std::size_t length,float phase = 0);
 
     ///生成方波波形
-    AwgFloatArray generateSquare(std::size_t length,float duty);
+    AwgFloatArray generateSquare(std::size_t length,float duty,float phase = 0);
 
     ///生成三角波形
-    AwgFloatArray generateTriangle(std::size_t length,float symmetry);
+    AwgFloatArray generateTriangle(std::size_t length,float symmetry,float phase = 0);
 
     ///生成噪声波形
     AwgFloatArray generateNoise(float sampleRate,float bandWidth);
@@ -504,6 +523,91 @@ namespace Awg
         }
         pool->waitforDone();
         return output;
+    }
+
+    template<typename T>
+    void reverseParallel(T* beg,T* end)
+    {
+        const std::size_t length = end - beg;
+        std::vector<std::size_t> chunks;
+        if(length % 2 == 0)
+        {
+            //如果数组长度为偶数
+            std::size_t half = length / 2;
+            chunks = Awg::splitLengthMin(half,Awg::MinArrayLength);
+        }
+        else
+        {
+            //如果数组长度为奇数
+            std::size_t half = (length - 1 ) / 2;
+            chunks = Awg::splitLengthMin(half,Awg::MinArrayLength);
+        }//按数组长度的一半去划分任务,保证每一个点都会被处理
+
+        ThreadPool* pool = Awg::globalThreadPool();
+
+        auto task = [](T* leftBeg, T* leftEnd,T* rightBeg,T* rightEnd)
+        {
+            Awg::exchange(leftBeg,leftEnd,rightBeg,rightEnd);
+            Awg::reverse(leftBeg,leftEnd);
+            Awg::reverse(rightBeg,rightEnd);
+        };
+
+        for(std::size_t i = 0; i < chunks.size(); i++)
+        {
+            T* leftBeg = beg;
+            T* leftEnd = beg + chunks[i];
+            T* rightBeg = end - chunks[i];
+            T* rightEnd = end;
+            pool->run<ThreadPool::Ordered>(task,leftBeg,leftEnd,rightBeg,rightEnd);
+
+            beg += chunks[i];
+            end -= chunks[i];
+        }
+        pool->waitforDone();
+    }
+
+    template<typename T>
+    bool exchangeParallel(T* leftBeg,T* leftEnd,T* rightBeg,T* rightEnd)
+    {
+        if(leftEnd - leftBeg != rightEnd -rightBeg)
+            return false;
+
+        const std::size_t length = leftEnd - leftBeg;
+        std::vector<std::size_t> chunks = Awg::splitLengthMin(length,Awg::MinArrayLength);
+        ThreadPool* pool = Awg::globalThreadPool();
+        for(std::size_t i = 0; i < chunks.size(); i++)
+        {
+            T* frontBeg = leftBeg;
+            T* frontEnd = frontBeg + chunks[i];
+            T* backBeg = rightEnd - chunks[i];
+            T* backEnd = rightEnd;
+            pool->run<ThreadPool::Ordered>(Awg::exchange,leftBeg,leftEnd,rightBeg,rightEnd);
+
+            leftBeg += chunks[i];
+            rightEnd -= chunks[i];
+        }
+        pool->waitforDone();
+        return true;
+    }
+
+    template<typename T>
+    void rotate(T* first,T* mid,T* last)
+    {
+#ifdef __AVX2__
+        Awg::reverse(first,last);
+        Awg::reverse(first,mid);
+        Awg::reverse(mid,last);
+#else
+        std::rotate(first,mid,last);
+#endif
+    }
+
+    template<typename T>
+    void rotateParallel(T* first,T* mid,T* last)
+    {
+        Awg::reverseParallel(first,last);
+        Awg::reverseParallel(first,mid);
+        Awg::reverseParallel(mid,last);
     }
 }
 

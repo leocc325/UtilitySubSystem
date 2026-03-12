@@ -37,7 +37,7 @@ namespace Awg
     constexpr unsigned FPGAbits = 12;
 
     ///波形的最大幅度
-    constexpr int Amplitude = 2 << (FPGAbits - 1);
+    constexpr int Amplitude = (2 << (FPGAbits - 1)) - 1;
 
     ///DMA地址
     constexpr unsigned long long DMAaddress = 0xC0000000;

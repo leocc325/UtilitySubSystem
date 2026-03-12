@@ -422,10 +422,10 @@ void Awg::reverse(char *beg, char *end)
     //交换这两组数据在数组中的位置:[9,8][7,6][5][4,3][2,1]
     //整个数组处理完毕:[9,8,7,6,5,4,3,2,1]
     int stepLength = 32;
+    const __m256i mask = _mm256_set_epi8(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,
+                                   0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15);
     while (beg + stepLength*2 <= end)
     {
-        __m256i mask = _mm256_set_epi8(0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,
-                                       0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15);
         //分别取出数组开头和末尾的32字节数据
         __m256i headChunk = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(beg));
         __m256i tailChunk = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(end - stepLength));
@@ -442,6 +442,103 @@ void Awg::reverse(char *beg, char *end)
         end -= stepLength;
     }
     std::reverse(beg,end);
+}
+
+void Awg::reverse(short *beg, short *end)
+{
+    const std::size_t step = 32 / sizeof(short);
+    // 反转每个块内的 short 顺序（保持每个 short 内部字节不变）
+    const __m256i mask = _mm256_setr_epi8(14,15,12,13,10,11,8,9,6,7,4,5,2,3,0,1,  // 低 128 位
+                                          14,15,12,13,10,11,8,9,6,7,4,5,2,3,0,1);   // 高 128 位
+
+    while (end - beg >= 2 * step)
+    {
+        __m256i front = _mm256_loadu_si256(reinterpret_cast<__m256i*>(beg));
+        __m256i back  = _mm256_loadu_si256(reinterpret_cast<__m256i*>(end - step));
+
+        __m256i front_rev_lane = _mm256_shuffle_epi8(front, mask);
+        __m256i back_rev_lane  = _mm256_shuffle_epi8(back,  mask);
+
+        // 交换高低 128 位，实现整体反转
+        __m256i front_rev = _mm256_permute2x128_si256(front_rev_lane, front_rev_lane, 0x01);
+        __m256i back_rev  = _mm256_permute2x128_si256(back_rev_lane,  back_rev_lane,  0x01);
+
+        // 将反转后的数据写回（前后交换）
+        _mm256_storeu_si256(reinterpret_cast<__m256i*>(beg), back_rev);
+        _mm256_storeu_si256(reinterpret_cast<__m256i*>(end - step), front_rev);
+
+        beg += step;
+        end -= step;
+    }
+    std::reverse(beg,end);
+}
+
+void Awg::reverse(float *beg, float *end)
+{
+    const std::size_t step = 32 / sizeof(float);
+    const __m256i mask = _mm256_setr_epi32(7,6,5,4,3,2,1,0);
+
+    while (end - beg >= 2 * step)
+    {
+        __m256 front = _mm256_loadu_ps(beg);
+        __m256 back  = _mm256_loadu_ps(end - step);
+
+        front = _mm256_permutevar8x32_ps(front, mask);
+        back  = _mm256_permutevar8x32_ps(back, mask);
+
+        _mm256_storeu_ps(beg, back);
+        _mm256_storeu_ps(end - step, front);
+
+        beg += step;
+        end -= step;
+    }
+    std::reverse(beg,end);
+}
+
+void Awg::exchange(short* leftBeg,short* leftEnd,short* rightBeg,short* rightEnd)
+{
+#ifdef __AVX2__
+    if(leftEnd - leftBeg == rightEnd -rightBeg)
+    {
+        //在前后两个区间长度相等的情况下才进行交换
+        std::size_t chunk = 32 / sizeof(short);
+        while (leftBeg + chunk <= leftEnd)
+        {
+            __m256i left = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(leftBeg));
+            __m256i right = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(rightBeg));
+            _mm256_storeu_si256(reinterpret_cast<__m256i*>(rightBeg),left);
+            _mm256_storeu_si256(reinterpret_cast<__m256i*>(leftBeg),right);
+            leftBeg += chunk;
+            rightBeg += chunk;
+        }
+        std::swap_ranges(leftBeg,leftEnd,rightBeg);
+    }
+#else
+    std::swap_ranges(leftBeg,leftEnd,rightBeg);
+#endif
+}
+
+void Awg::exchange(float* leftBeg,float* leftEnd,float* rightBeg,float* rightEnd)
+{
+#ifdef __AVX2__
+    if(leftEnd - leftBeg == rightEnd -rightBeg)
+    {
+        //在前后两个区间长度相等的情况下才进行交换
+        std::size_t chunk = 32 / sizeof(float);
+        while (leftBeg + chunk <= leftEnd)
+        {
+            __m256 left = _mm256_loadu_ps(leftBeg);
+            __m256 right = _mm256_loadu_ps(rightBeg);
+            _mm256_storeu_ps(rightBeg,left);
+            _mm256_storeu_ps(leftBeg,right);
+            leftBeg += chunk;
+            rightBeg += chunk;
+        }
+        std::swap_ranges(leftBeg,leftEnd,rightBeg);
+    }
+#else
+    std::swap_ranges(leftBeg,leftEnd,rightBeg);
+#endif
 }
 
 void Awg::compressShort12Bit(const short *begin, const short *end, char *output)
@@ -657,6 +754,12 @@ std::vector<std::size_t> Awg::splitLengthAligned(std::size_t length,std::size_t 
     return vec;
 }
 
+double Awg::phaseToPercent(double phase)
+{
+    double map = std::fmod(phase,360) + 360;//将相位映射到[0~360]
+    return std::fmod(map,360) / 360;//求相位对应的百分比
+}
+
 AwgFloatArray Awg::generateSin(std::size_t length, float phase)
 {
     // 计算一个完整周期内的采样点数
@@ -679,7 +782,7 @@ AwgFloatArray Awg::generateSin(std::size_t length, float phase)
 
     //每一个线程处理的点数为总点数/线程数再向上取整
     std::size_t index = 0;
-    std::vector<std::size_t> chunks = Awg::splitLengthAligned(length,Awg::MinArrayLength,Awg::ArrayAlignment/sizeof(double));
+    std::vector<std::size_t> chunks = Awg::splitLengthAligned(length,Awg::MinArrayLength,Awg::ArrayAlignment/sizeof(float));
     ThreadPool* pool = Awg::globalThreadPool();
     for(std::size_t i = 0; i < chunks.size(); i++)
     {
@@ -698,7 +801,7 @@ AwgFloatArray Awg::generateSin(std::size_t length, float phase)
     return waveform;
 }
 
-AwgFloatArray Awg::generateSquare(std::size_t length, float duty)
+AwgFloatArray Awg::generateSquare(std::size_t length, float duty,float phase)
 {
     //每个周期最少100个点,这样可以将占空比的精度控制到1%
     if(length < 100)
@@ -716,7 +819,7 @@ AwgFloatArray Awg::generateSquare(std::size_t length, float duty)
 
     //每一个线程处理的点数为总点数/线程数再向上取整
     std::size_t index = 0;
-    std::vector<std::size_t> chunks = Awg::splitLengthAligned(length,Awg::MinArrayLength,Awg::ArrayAlignment/sizeof(double));
+    std::vector<std::size_t> chunks = Awg::splitLengthAligned(length,Awg::MinArrayLength,Awg::ArrayAlignment/sizeof(float));
     ThreadPool* pool = Awg::globalThreadPool();
     for(std::size_t i = 0; i < chunks.size(); i++)
     {
@@ -731,10 +834,16 @@ AwgFloatArray Awg::generateSquare(std::size_t length, float duty)
     }
 
     pool->waitforDone();
+
+    //对于方波,先生成原始数据再根据相位进行旋转效率会更高一些
+    std::size_t phaseIndex = std::round(Awg::phaseToPercent(phase) * length);
+    if(phaseIndex != 0)
+        Awg::rotate(output,output+phaseIndex,output+length);
+
     return waveform;
 }
 
-AwgFloatArray Awg::generateTriangle(std::size_t length, float symmetry)
+AwgFloatArray Awg::generateTriangle(std::size_t length, float symmetry,float phase)
 {
     //每个周期最少100个点,这样可以将对称性的精度控制到1%
     if(length < 100)
@@ -779,7 +888,7 @@ AwgFloatArray Awg::generateTriangle(std::size_t length, float symmetry)
 
     //每一个线程处理的点数为总点数/线程数再向上取整
     std::size_t index = 0;
-    std::vector<std::size_t> chunks = Awg::splitLengthAligned(length,Awg::MinArrayLength,Awg::ArrayAlignment/sizeof(double));
+    std::vector<std::size_t> chunks = Awg::splitLengthAligned(length,Awg::MinArrayLength,Awg::ArrayAlignment/sizeof(float));
     ThreadPool* pool = Awg::globalThreadPool();
     for(std::size_t i = 0; i < chunks.size(); i++)
     {
@@ -794,6 +903,12 @@ AwgFloatArray Awg::generateTriangle(std::size_t length, float symmetry)
     }
 
     pool->waitforDone();
+
+    //对于三角波,先生成原始数据再根据相位进行旋转效率会更高一些
+    std::size_t phaseIndex = std::round(Awg::phaseToPercent(phase) * length);
+    if(phaseIndex != 0)
+        Awg::rotate(output,output+phaseIndex,output+length);
+
     return waveform;
 }
 
