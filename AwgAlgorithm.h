@@ -594,9 +594,9 @@ namespace Awg
     void rotate(T* first,T* mid,T* last)
     {
 #ifdef __AVX2__
-        Awg::reverse(first,last);
         Awg::reverse(first,mid);
         Awg::reverse(mid,last);
+        Awg::reverse(first,last);
 #else
         std::rotate(first,mid,last);
 #endif
@@ -605,9 +605,9 @@ namespace Awg
     template<typename T>
     void rotateParallel(T* first,T* mid,T* last)
     {
-        Awg::reverseParallel(first,last);
         Awg::reverseParallel(first,mid);
         Awg::reverseParallel(mid,last);
+        Awg::reverseParallel(first,last);
     }
 }
 
