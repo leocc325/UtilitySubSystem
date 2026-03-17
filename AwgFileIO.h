@@ -64,6 +64,12 @@ namespace Awg
 
     AwgFloatArray processTextFile(QFile *file, std::size_t mapStart, std::size_t mapSize,const std::vector<char>& spliters);
 
+    ///将给定的txt文本文件转换为二进制文件
+    void convertTxtToBinaryFile(const QString& path);
+
+    ///将给定的csv文本文件转换为二进制文件
+    void convertCsvToBinaryFile(const QString& path);
+
     ///文件加载完毕之后可以调用这个函数获取最近一次从文件中加载的数据最大值和最小值,这个函数以及对应数据是线程安全的
     std::pair<const float, const float> getMinMaxRecords();
 }

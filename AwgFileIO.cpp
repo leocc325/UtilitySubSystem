@@ -19,6 +19,206 @@ void resetMinMax()
     recordMin = std::numeric_limits<float>::max();
 }
 
+std::size_t parseFromChars(const char* beg,const char* end,const std::vector<char> &spliters)
+{
+    std::size_t arraySize = 1; //vector的容量比找到的分隔符数量多一个
+    for(std::size_t i = 0; i < spliters.size(); i++)
+    {
+        arraySize += Awg::countChar(beg,end,spliters[i]);
+    }
+
+    //如果文本是以分隔符结尾或者开头,则让数组长度减1,因为开头的分隔符前面没有数据,结尾的分隔符后面也没有数据,这样可以准确地确定数组长度
+    for(std::size_t i = 0; i < spliters.size(); i++)
+    {
+        if( (*beg) == spliters[i] )
+            --arraySize;
+
+        if( (*(end-1)) == spliters[i] )
+            --arraySize;
+    }
+    return arraySize;
+}
+
+std::size_t parseFromFile(QFile* file,std::size_t mapStart, std::size_t mapSize, const std::vector<char> &spliters)
+{
+    FileMutex.lock();
+    unsigned char* buf = file->map(mapStart,mapSize);
+    FileMutex.unlock();
+
+    if(buf == nullptr)
+    {
+        emit AWGSIG->sigWarningMessage(QCoreApplication::translate("Awg","文件%1映射失败,在分块%2").arg(file->fileName()).arg(mapStart));
+        return 0;
+    }
+
+    const char* start = reinterpret_cast<const char*>(buf);
+    const char* end = start + mapSize;
+
+    std::size_t length = parseFromChars(start,end,spliters);
+
+    FileMutex.lock();
+    while (!file->unmap(buf))
+    {
+        emit AWGSIG->sigWarningMessage(QCoreApplication::translate("Awg","文件%1映射解除失败,在分块%2").arg(file->fileName()).arg(mapStart));
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    FileMutex.unlock();
+    return length;
+}
+
+//根据文本块和数据长度信息将文本转换并映射到目标文件,所有位置大小相关参数单位都是字节
+void convertImpl(QFile *srcFile,std::size_t srcStart,std::size_t srcSize,
+                 QFile* dstFile,std::size_t dstStart,std::size_t dstSize)
+{
+    FileMutex.lock();
+    unsigned char* srcbuf = srcFile->map(srcStart,srcSize);
+    unsigned char* dstbuf = dstFile->map(dstStart,dstSize);
+    FileMutex.unlock();
+
+    if(srcbuf != nullptr && dstbuf != nullptr)
+    {
+        Awg::DT* dst = reinterpret_cast<Awg::DT*>(dstbuf);
+        const char* process = reinterpret_cast<const char*>(srcbuf);
+        const char* start = reinterpret_cast<const char*>(srcbuf);
+        const char* end = start + srcSize;
+        std::size_t index = 0;
+        while (start < end)
+        {
+            //这里手动跳过非数字字符,虽然from_chars也可以自动跳过,但是影响效率
+            if( !Awg::isIntegerBegin(*start) )
+            {
+                ++start;
+                continue;
+            }
+
+            auto ret = fast_float::from_chars(start, end, dst[index]);
+            if(ret.ec == std::errc())
+            {
+                ++index;
+            }
+            else if(ret.ec == std::errc::result_out_of_range)
+            {
+                // 根据值的大小决定使用最大值还是最小值
+                if(*start == '-')
+                    dst[index] = -std::numeric_limits<float>::min();
+                else
+                    dst[index] = std::numeric_limits<float>::max();
+                ++index;
+            }
+            start = (ret.ptr == start) ? start+1 : ret.ptr;//更新指针位置
+            if(start - process > 1e6)
+            {
+                emit AWGSIG->sigFileProcess(start - process);//每读取1M字节数据发送一次信号更新进度
+                process = start;
+            }
+        }
+        emit AWGSIG->sigFileProcess(start - process);//发送最后一部分数据进度
+    }
+    else
+    {
+        emit AWGSIG->sigWarningMessage(QCoreApplication::translate("Awg","源文件/目标文件映射失败"));
+    }
+
+    FileMutex.lock();
+    if(srcbuf != nullptr)
+    {
+        while (!srcFile->unmap(srcbuf))
+        {
+            emit AWGSIG->sigWarningMessage(QCoreApplication::translate("Awg","文件%1映射解除失败,在分块%2").arg(srcFile->fileName()).arg(srcStart));
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+    }
+    if(dstbuf != nullptr)
+    {
+        while (!dstFile->unmap(dstbuf))
+        {
+            emit AWGSIG->sigWarningMessage(QCoreApplication::translate("Awg","文件%1映射解除失败,在分块%2").arg(dstFile->fileName()).arg(dstStart));
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+    }
+    FileMutex.unlock();
+}
+
+void convertTextToBinaryFile(const QString& path,const std::vector<char>& spliters)
+{
+    QFile srcFile(path);
+    if(srcFile.size() == 0  ||  srcFile.size() > Awg::getFreeMemoryWindows()*0.9)
+    {
+        emit AWGSIG->sigWarningMessage(QCoreApplication::translate("Awg","文件%1为空或者内存不足无法加载").arg(srcFile.fileName()));
+        return;
+    }
+
+    if(srcFile.open(QIODevice::ReadOnly))
+    {
+        resetMinMax();
+
+        ThreadPool* pool = Awg::globalThreadPool();
+
+        std::vector<std::size_t> chunkSizes = Awg::cutTextFile(srcFile,Awg::MinFileChunk,spliters);
+        unsigned taskNum = chunkSizes.size();
+        if(taskNum == 0)
+        {
+            emit AWGSIG->sigWarningMessage(QCoreApplication::translate("Awg","文件%1拆分失败").arg(srcFile.fileName()));
+            return;
+        }
+        else
+        {
+            std::vector<std::future<std::size_t>> futures;
+            futures.reserve(taskNum);
+            std::size_t mapOffset = 0;
+            for(unsigned i = 0; i < taskNum; i++)
+            {
+                std::future<std::size_t> f = pool->run<ThreadPool::Ordered>(parseFromFile,&srcFile,mapOffset,chunkSizes[i],spliters);
+                futures.push_back(std::move(f));
+                mapOffset += chunkSizes[i];
+            }
+
+            pool->waitforDone();
+
+            //获取线程返回的计算结果:每个文本块对应的数据长度
+            std::size_t dstFileSize = 0;
+            std::vector<std::size_t> arrayLengths;
+            arrayLengths.reserve(futures.size());
+            for(std::future<std::size_t>& f : futures)
+            {
+                std::size_t len = f.get();
+                arrayLengths.push_back(len);
+                dstFileSize += len * sizeof(Awg::DT);
+            }
+
+            QString dstFileName = path + ".bin";
+            QFile dstFile(dstFileName);
+            if(dstFile.open(QIODevice::ReadWrite | QIODevice::Truncate))
+            {
+                if(dstFile.resize(dstFileSize))
+                {
+                    emit AWGSIG->sigFileProcessMax(srcFile.size());
+
+                    //创建或者打开目标文件之后开始转换
+                    std::size_t srcStart = 0 , dstStart = 0;
+                    std::size_t srcSize = 0 , dstSize = 0;
+                    for(int i = 0; i < taskNum; i++)
+                    {
+                        srcSize = chunkSizes[i];
+                        dstSize = arrayLengths[i] * sizeof(Awg::DT);
+                        pool->run<ThreadPool::Ordered>(convertImpl,&srcFile,srcStart,srcSize,&dstFile,dstStart,dstSize);
+
+                        srcStart += srcSize;
+                        dstStart += dstSize;
+                    }
+
+                    pool->waitforDone();
+                    emit AWGSIG->sigWarningMessage(QCoreApplication::translate("Awg","目标文件转换完成"));
+                }
+                else
+                    emit AWGSIG->sigWarningMessage(QCoreApplication::translate("Awg","目标文件resize失败"));
+            }
+            else
+                emit AWGSIG->sigWarningMessage(QCoreApplication::translate("Awg","目标文件创建失败"));
+        }
+    }
+}
+
 template<Awg::FileFormat FT>
 void storeTextFile(const QString &path, const Awg::DT *array, const std::size_t arrayLength)
 {
@@ -102,14 +302,29 @@ void Awg::storeBinFile(const QString &path, const Awg::DT *array, const std::siz
     }
 
     QFile file(path);
-    const std::size_t totalSize = sizeof (Awg::DT) * length;
-    if(file.resize(totalSize))
+    if(file.open(QIODevice::ReadWrite))
     {
-        unsigned char* buf = file.map(0,totalSize);
-        if(buf)
-            memcpy(buf,array,totalSize);
-        file.unmap(buf);
+        const std::size_t totalSize = sizeof (Awg::DT) * length;
+        if(file.resize(totalSize))
+        {
+            unsigned char* buf = file.map(0,totalSize);
+            if(buf)
+                memcpy(buf,array,totalSize);
+            else
+                emit AWGSIG->sigWarningMessage(QCoreApplication::translate("Awg","数据写入失败"));
+            file.unmap(buf);
+        }
+        else
+        {
+            emit AWGSIG->sigWarningMessage(QCoreApplication::translate("Awg","文件大小重置失败"));
+        }
     }
+    else
+    {
+        emit AWGSIG->sigWarningMessage(QCoreApplication::translate("Awg","文件打开失败,数据保存失败"));
+        return;
+    }
+
 }
 
 void Awg::storeCsvFile(const QString &path, const Awg::DT *array, const std::size_t length)
@@ -321,6 +536,7 @@ AwgFloatArray Awg::processBinFile(QFile *file, std::size_t mapStart, std::size_t
     while (!file->unmap(buf))
     {
         emit AWGSIG->sigWarningMessage(QCoreApplication::translate("Awg","文件%1映射解除失败,在分块%2").arg(file->fileName()).arg(mapStart));
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     recordMin = std::min(recordMin,*pair.first);
     recordMax = std::max(recordMax,*pair.second);
@@ -341,31 +557,17 @@ AwgFloatArray Awg::processTextFile(QFile *file, std::size_t mapStart, std::size_
         return AwgFloatArray{};
     }
 
-    const char* start = reinterpret_cast<const char*>(buf);
     const char* process = reinterpret_cast<const char*>(buf);
+    const char* start = reinterpret_cast<const char*>(buf);
     const char* end = start + mapSize;
 
-    std::size_t index = 0;
-    std::size_t arraySize = 1; //vector的容量比找到的分隔符数量多一个
-    for(std::size_t i = 0; i < spliters.size(); i++)
-    {
-        arraySize += Awg::countChar(start,end,spliters[i]);
-    }
-
-    //如果文本是以分隔符结尾或者开头,则让数组长度减1,因为开头的分隔符前面没有数据,结尾的分隔符后面也没有数据,这样可以准确地确定数组长度
-    for(std::size_t i = 0; i < spliters.size(); i++)
-    {
-        if( (*start) == spliters[i] )
-            --arraySize;
-
-        if( (*(end-1)) == spliters[i] )
-            --arraySize;
-    }
+    std::size_t arraySize = parseFromChars(start,end,spliters);
     AwgFloatArray array(arraySize);
 
     float maxValue = std::numeric_limits<float>::min();
     float minValue = std::numeric_limits<float>::max();
 
+    std::size_t index = 0;
     while (start < end)
     {
         //这里手动跳过非数字字符,虽然from_chars也可以自动跳过,但是影响效率
@@ -416,12 +618,23 @@ AwgFloatArray Awg::processTextFile(QFile *file, std::size_t mapStart, std::size_
     while (!file->unmap(buf))
     {
         emit AWGSIG->sigWarningMessage(QCoreApplication::translate("Awg","文件%1映射解除失败,在分块%2").arg(file->fileName()).arg(mapStart));
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     recordMin = std::min(recordMin,minValue);
     recordMax = std::max(recordMax,maxValue);
     FileMutex.unlock();
 
     return array;
+}
+
+void Awg::convertTxtToBinaryFile(const QString &path)
+{
+    convertTextToBinaryFile(path,std::vector<char>{'\n'});
+}
+
+void Awg::convertCsvToBinaryFile(const QString &path)
+{
+    convertTextToBinaryFile(path,std::vector<char>{'\n',','});
 }
 
 std::pair<const float,const float> Awg::getMinMaxRecords()
