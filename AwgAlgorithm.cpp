@@ -106,6 +106,33 @@ namespace Awg
         }
     }
 
+    void subScalar(float* beg,float* end,float value)
+    {
+        while (beg < end)
+        {
+            *beg = *beg - value;
+            ++beg;
+        }
+    }
+
+    void subAvx2(float* beg,float* end,float value)
+    {
+#if __AVX2__
+        const int step = 32 / sizeof(float);
+        __m256 vec = _mm256_set1_ps(0);
+        __m256 target = _mm256_set1_ps(value);
+        while (beg + step <= end)
+        {
+            vec = _mm256_loadu_ps(beg);
+            vec = _mm256_sub_ps(vec,target);
+            _mm256_storeu_ps(beg,vec);
+
+            beg += step;
+        }
+        subScalar(beg,end,value);
+#endif
+    }
+
 #ifdef __AVX2__
     void compressShort12BitAvx2(const short *begin, const short *end, char *output)
     {
@@ -324,6 +351,7 @@ namespace Awg
         //处理剩余元素
         outputTriangleScalar(raiseK,raiseB,fallK,fallB,output,peak,beg,end);
     }
+
 #endif
 }
 
@@ -539,6 +567,24 @@ void Awg::exchange(float* leftBeg,float* leftEnd,float* rightBeg,float* rightEnd
 #else
     std::swap_ranges(leftBeg,leftEnd,rightBeg);
 #endif
+}
+
+void Awg::sub(float *beg, float *end, float value)
+{
+    std::size_t length = end - beg;
+    std::vector<std::size_t> chunks = Awg::splitLengthMin(length,Awg::MinArrayLength);
+
+    ThreadPool* pool = Awg::globalThreadPool();
+    for(int i = 0; i < chunks.size(); i++)
+    {
+#if __AVX2__
+        pool->run(Awg::subAvx2,beg,beg+chunks[i],value);
+#else
+        pool->run(Awg::subScalar,beg,beg+chunks[i],value);
+#endif
+        beg += chunks[i];
+    }
+    pool->waitforDone();
 }
 
 void Awg::compressShort12Bit(const short *begin, const short *end, char *output)
@@ -866,22 +912,23 @@ AwgFloatArray Awg::generateTriangle(std::size_t length, float symmetry,float pha
     //这里需要处理对称性为0或者1的情况
     float raiseK = 1 ,raiseB = 0,fallK = 1,fallB = 0;
 
+    double maxAmpl = Awg::Amplitude + 1;
     if(symmetry == 0)
     {
-        fallK = float(0 - Awg::Amplitude) / (length - 0);
-        fallB = Awg::Amplitude;
+        fallK = float(0 - maxAmpl) / (length - 0);
+        fallB = maxAmpl;
     }
     else if (symmetry == 1)
     {
-        raiseK = float(Awg::Amplitude - 0) / (length - 0);
+        raiseK = float(maxAmpl - 0) / (length - 0);
         raiseB = 0;
     }
     else
     {
-        raiseK =float(Awg::Amplitude - 0)/ (peakIndex - 0);
-        raiseB = Awg::Amplitude - raiseK * peakIndex;
-        fallK = float(0 - Awg::Amplitude) / (length - peakIndex);
-        fallB =  Awg::Amplitude - fallK*peakIndex;
+        raiseK =float(maxAmpl - 0)/ (peakIndex - 0);
+        raiseB = maxAmpl - raiseK * peakIndex;
+        fallK = float(0 - maxAmpl) / (length - peakIndex);
+        fallB =  maxAmpl - fallK*peakIndex;
     }
     float* output = waveform.data();
     float* peak = output + peakIndex;

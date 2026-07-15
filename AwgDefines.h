@@ -30,6 +30,9 @@ namespace Awg
     ///任意波采样率[FPGA下面跟频率相关的都是1000进制]
     constexpr double FpgaClockMax = 20e9;
 
+    ///任意波采样率[FPGA下面跟频率相关的都是1000进制]
+    constexpr double FpgaClockMin = 10e9;
+
     ///fpga内部可以保存的波形数据点的点数(暂时假定为1G)[FPGA下面跟点数相关的都是1024进制]
     constexpr double FpgaPointsSize = 1*1024*1024*1024;
 
@@ -37,7 +40,7 @@ namespace Awg
     constexpr unsigned FPGAbits = 12;
 
     ///波形的最大幅度
-    constexpr int Amplitude = (2 << (FPGAbits - 1)) - 1;
+    constexpr int Amplitude = (2 << (FPGAbits - 1)) - 1;//[0~4095]
 
     ///DMA地址
     constexpr unsigned long long DMAaddress = 0xC0000000;
@@ -61,7 +64,7 @@ namespace Awg
         ///N:波形长度  Fc:Fpga时钟频率 Fs:用户设置的波形输出频率 Re:每一个点重复次数
         ///Fs = Fc / (Re * N)  =>  Fc = Fs * N * Re
 
-        if(Fs > Awg::FpgaClockMax/2)
+        if(Fs > Awg::FpgaClockMin)
             return false;
 
         Re = 1;
@@ -94,14 +97,14 @@ namespace Awg
             return N * Fs * Re;
         };
 
-        //调整重复次数使输出频率能落在10G-20G之间
-        while( freq() < Awg::FpgaClockMax/2)
+        //调整重复次数使输出频率能落在10G-25G之间
+        while( freq() < Awg::FpgaClockMin)
         {
             Re = Re * 2;//repeat值只能是2的N次幂
         }
 
-        //如果最后一次重复次数增加导致输出频率超出了20G,则说明没有对应的设置能让信号按预定频率输出
-        if(freq() > Awg::FpgaClockMax)
+        //如果最后一次重复次数增加导致输出频率超出了20G,或者重复次数超过64次,则说明没有对应的设置能让信号按预定频率输出
+        if( (freq() > Awg::FpgaClockMax) || (Re > 64))
             return false;
         else
         {

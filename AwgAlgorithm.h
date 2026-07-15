@@ -44,6 +44,9 @@ namespace Awg
     template<typename T>
     void rotateParallel(T* first,T* mid,T* last);//函数定义在后面
 
+    ///将[beg,end)区间的所有数据减去同一个值
+    void sub(float* beg,float* end,float value);
+
     ///将short数组中的每一个值取12bit压缩写入到二进制内存中,返回写入的长度,需要保证output长度足够写入全部数据,否则会导致程序崩溃
     void compressShort12Bit(const short* beg,const short* end,char* output);//1024bit,前768bit存放，后256比特不适用
 
